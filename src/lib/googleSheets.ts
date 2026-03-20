@@ -43,24 +43,14 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
 
     const d = job.raw_lp_data || {}
 
-    // Format address as one line
-    const address = [d.address1, d.city, d.state, d.zip]
-      .filter(Boolean)
-      .join(', ')
-
-    // Human-facing contract ID (e.g. 12345-W)
+    const address = [d.address1, d.city, d.state, d.zip].filter(Boolean).join(', ')
     const humanJobId = d.contractid || job.contract_id || ''
-
-    // Numeric LP job ID (e.g. 3434)
     const numericJobId = job.lp_job_id
-
-    // Phone
     const phone = d.phone1 || ''
-
-    // Financials
     const gross = parseFloat(d.grossamount || job.gross_amount || 0)
     const balance = parseFloat(d.balancedue || job.balance_due || 0)
 
+    // Fill in the Costing tab
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: newSheetId,
       requestBody: {
@@ -77,7 +67,17 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
       },
     })
 
-    console.log(`Created measure sheet for ${customerName}: ${newSheetId}`)
+    // Make the sheet public (anyone with the link can view)
+    await drive.permissions.create({
+      fileId: newSheetId,
+      requestBody: {
+        role: 'reader',
+        type: 'anyone',
+      },
+    })
+
+    const sheetUrl = `https://docs.google.com/spreadsheets/d/${newSheetId}`
+    console.log(`Created measure sheet for ${customerName}: ${sheetUrl}`)
     return newSheetId
   } catch (err) {
     console.error(`Failed to create measure sheet for job ${job.lp_job_id}:`, err)
