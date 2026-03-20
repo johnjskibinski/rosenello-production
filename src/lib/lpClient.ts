@@ -10,10 +10,10 @@ interface TokenCache {
 const LP_BASE = 'https://api.leadperfection.com';
 let tokenCache: TokenCache | null = null;
 
-export async function getLPToken(): Promise<string> {
+export async function getLPToken(forceRefresh = false): Promise<string> {
   const now = Date.now();
 
-  if (tokenCache && tokenCache.expiresAt > now + 30 * 60 * 1000) {
+  if (!forceRefresh && tokenCache && tokenCache.expiresAt > now + 30 * 60 * 1000) {
     return tokenCache.token;
   }
 
@@ -37,19 +37,18 @@ export async function getLPToken(): Promise<string> {
 
   tokenCache = {
     token,
-    expiresAt: now + 23.5 * 60 * 60 * 1000,
+    expiresAt: Date.now() + 23.5 * 60 * 60 * 1000,
   };
 
   console.log('[LP] Token refreshed');
   return token;
 }
 
-export async function lpPost(endpoint: string, body: Record<string, any> = {}): Promise<any> {
+export async function lpPost(endpoint: string, body: Record<string, any> = {}, retry = true): Promise<any> {
   const token = await getLPToken();
   const url = `${LP_BASE}/api/${endpoint}`;
   console.log('[LP] POST', url, body);
 
-  // Convert all values to strings like Apps Script does
   const formData = new URLSearchParams();
   for (const [key, val] of Object.entries(body)) {
     formData.append(key, String(val ?? ''));
@@ -69,6 +68,14 @@ export async function lpPost(endpoint: string, body: Record<string, any> = {}): 
   );
 
   console.log('[LP] Response status:', response.status);
+
+  // If 401 or 404, clear token cache and retry once with a fresh token
+  if ((response.status === 401 || response.status === 404) && retry) {
+    console.log('[LP] Auth failed, refreshing token and retrying...');
+    tokenCache = null;
+    return lpPost(endpoint, body, false);
+  }
+
   if (response.status >= 400) {
     throw new Error(`LP API ${endpoint} failed (HTTP ${response.status}): ${JSON.stringify(response.data).slice(0, 300)}`);
   }
