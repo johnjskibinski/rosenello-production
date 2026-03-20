@@ -40,7 +40,7 @@ export async function syncActiveJobs() {
 
     while (hasMore) {
       try {
-        const result = await lpPost('GetJobStatusChanges', {
+        const result = await lpPost('Customers/GetJobStatusChanges', {
           jbs_id: status,
           startdate: '2020-01-01',
           enddate: '2099-12-31',

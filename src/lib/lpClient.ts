@@ -7,12 +7,11 @@ interface TokenCache {
   expiresAt: number;
 }
 
-const LP_BASE = 'https://e5d8a.leadperfection.com';
+const LP_BASE = 'https://api.leadperfection.com';
 let tokenCache: TokenCache | null = null;
 
 export async function getLPToken(): Promise<string> {
   const now = Date.now();
-
   if (tokenCache && tokenCache.expiresAt > now + 30 * 60 * 1000) {
     return tokenCache.token;
   }
@@ -37,7 +36,7 @@ export async function getLPToken(): Promise<string> {
 
   tokenCache = {
     token,
-    expiresAt: now + 23.5 * 60 * 60 * 1000,
+    expiresAt: Date.now() + 23.5 * 60 * 60 * 1000,
   };
 
   console.log('[LP] Token refreshed');
