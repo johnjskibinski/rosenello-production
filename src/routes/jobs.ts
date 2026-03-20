@@ -1,0 +1,64 @@
+import { Router } from 'express';
+import { syncJobs } from '../services/lpSync';
+import { supabase } from '../lib/supabase';
+import { lpPost, getLPToken } from '../lib/lpClient';
+
+const router = Router();
+
+router.get('/lptest', async (_, res) => {
+  try {
+    const token = await getLPToken();
+    res.json({ token: token.slice(0, 20) + '...', length: token.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/lpraw', async (_, res) => {
+  try {
+    const today = new Date();
+    const start = new Date();
+    start.setDate(today.getDate() - 30);
+
+    const fmt = (d: Date) =>
+      `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}`;
+
+    const data = await lpPost('Customers/GetJobStatusChanges', {
+      startdate: fmt(start),
+      enddate: fmt(today),
+      cst_id: '0',
+      job_id: '0',
+      jbs_id: '',
+      format: '1',
+      options: '0',
+      sortorder: '1',
+      PageSize: '25',
+      StartIndex: '1',
+    });
+
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/sync', async (_, res) => {
+  try {
+    const result = await syncJobs();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/', async (_, res) => {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .order('last_synced_at', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+export default router;
