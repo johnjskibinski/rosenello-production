@@ -44,8 +44,8 @@ export async function syncActiveJobs() {
           jbs_id: status,
           startdate: '2020-01-01',
           enddate: '2099-12-31',
-          pagesize: '250',
-          page: String(page),
+          PageSize: '250',
+          StartIndex: String((page - 1) * 250),
         })
 
         const jobs = result?.jobstatuschanges?.job
