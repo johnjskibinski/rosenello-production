@@ -69,8 +69,27 @@ export async function syncActiveJobs() {
           // Create measure sheets for SN and PU jobs only
           if (MEASURE_SHEET_STATUSES.includes(status)) {
             for (const job of mapped) {
+              // Skip if sheet already exists in DB
+              const { data: existing } = await supabase
+                .from('jobs')
+                .select('measure_sheet_url')
+                .eq('lp_job_id', job.lp_job_id)
+                .single()
+
+              if (existing?.measure_sheet_url) {
+                console.log(`Sheet already exists for job ${job.lp_job_id}, skipping`)
+                continue
+              }
+
               const sheetId = await createMeasureSheet(job)
-              if (sheetId) sheetsCreated++
+              if (sheetId) {
+                sheetsCreated++
+                const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}`
+                await supabase
+                  .from('jobs')
+                  .update({ measure_sheet_url: sheetUrl })
+                  .eq('lp_job_id', job.lp_job_id)
+              }
             }
           }
         }
