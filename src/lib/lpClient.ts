@@ -7,7 +7,7 @@ interface TokenCache {
   expiresAt: number;
 }
 
-const LP_BASE = 'https://api.leadperfection.com';
+const LP_BASE = 'https://e5d8a.leadperfection.com';
 let tokenCache: TokenCache | null = null;
 
 export async function getLPToken(): Promise<string> {
