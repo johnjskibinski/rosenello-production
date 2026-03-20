@@ -45,7 +45,7 @@ export async function syncActiveJobs() {
           startdate: '2020-01-01',
           enddate: '2099-12-31',
           PageSize: '250',
-          StartIndex: String((page - 1) * 250),
+          StartIndex: String((page - 1) * 250 + 1),
         })
 
         const jobs = result?.jobstatuschanges?.job
