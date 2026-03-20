@@ -48,9 +48,7 @@ export async function syncActiveJobs() {
           StartIndex: String((page - 1) * 250 + 1),
         })
 
-        console.log('[LP] Result keys:', JSON.stringify(Object.keys(result || {})))
-        console.log('[LP] Result sample:', JSON.stringify(result).slice(0, 500))
-        const jobs = result?.jobstatuschanges?.job
+        const jobs = result
         if (!jobs) { hasMore = false; break }
 
         const jobArray = Array.isArray(jobs) ? jobs : [jobs]
