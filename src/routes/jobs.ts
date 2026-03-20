@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { syncJobs } from '../services/lpSync';
+import { syncActiveJobs } from '../services/lpSync';
 import { supabase } from '../lib/supabase';
 import { lpPost, getLPToken } from '../lib/lpClient';
 
@@ -44,7 +44,7 @@ router.get('/lpraw', async (_, res) => {
 
 router.post('/sync', async (_, res) => {
   try {
-    const result = await syncJobs();
+    const result = await syncActiveJobs();
     res.json({ success: true, ...result });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
