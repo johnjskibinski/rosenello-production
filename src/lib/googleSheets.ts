@@ -88,7 +88,12 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
     console.log(`Created measure sheet for ${customerName}: ${sheetUrl}`)
     return newSheetId
   } catch (err) {
-    console.error(`Failed to create measure sheet for job ${job.lp_job_id}:`, err)
+    const errData = (err as any)?.response?.data?.error
+    console.error(`Failed to create measure sheet for job ${job.lp_job_id}:`, JSON.stringify({
+      message: (err as any)?.message,
+      cause: (err as any)?.cause,
+      responseError: errData,
+    }, null, 2))
     return null
   }
 }
