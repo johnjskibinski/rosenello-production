@@ -54,7 +54,11 @@ export async function syncActiveJobs() {
         const jobArray = Array.isArray(jobs) ? jobs : [jobs]
         if (jobArray.length === 0) { hasMore = false; break }
 
-        const mapped = jobArray.map(mapJob)
+        // Filter out any records without a valid job ID
+        const mapped = jobArray.map(mapJob).filter(j => !isNaN(j.lp_job_id) && j.lp_job_id > 0)
+        if (mapped.length === 0) { hasMore = false; break }
+
+        console.log(`[Sync] Status ${status} page ${page}: ${mapped.length} jobs`)
 
         const { error } = await supabase
           .from('jobs')
