@@ -10,6 +10,7 @@ function getAuth() {
   if (rawJson.startsWith('"') && rawJson.endsWith('"')) rawJson = rawJson.slice(1, -1)
   rawJson = rawJson.replace(/\\n/g, '\\n')
   const creds = JSON.parse(rawJson)
+  console.log("[Auth] Using service account:", creds.client_email)
   return new google.auth.GoogleAuth({
     credentials: creds,
     scopes: [
