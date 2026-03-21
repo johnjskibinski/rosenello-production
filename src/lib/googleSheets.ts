@@ -44,7 +44,7 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
       fileId: TEMPLATE_SHEET_ID,
       requestBody: {
         name: sheetTitle,
-        parents: [process.env.GOOGLE_DRIVE_FOLDER_ID || '1ZWQoi0_ZV2-K2UeuGXQUnYNouUTes3V2'],
+
       },
     })
     const newSheetId = copy.data.id!
