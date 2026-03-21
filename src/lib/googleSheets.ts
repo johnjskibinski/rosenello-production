@@ -3,9 +3,13 @@ import { google } from 'googleapis'
 const TEMPLATE_SHEET_ID = '1WfdoSeTwr-nt-8OF6eBRs72YZ8kjQzEDf00xkmzH2Ws'
 
 function getAuth() {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
-  if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not set')
-  const creds = JSON.parse(raw)
+  let rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+  if (!rawJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not set')
+  rawJson = rawJson.trim()
+  if (rawJson.startsWith("'") && rawJson.endsWith("'")) rawJson = rawJson.slice(1, -1)
+  if (rawJson.startsWith('"') && rawJson.endsWith('"')) rawJson = rawJson.slice(1, -1)
+  rawJson = rawJson.replace(/\\n/g, '\\n')
+  const creds = JSON.parse(rawJson)
   return new google.auth.GoogleAuth({
     credentials: creds,
     scopes: [

@@ -7,7 +7,7 @@ const MEASURE_SHEET_STATUSES = ['SN', 'PU']
 
 function mapJob(raw: any) {
   return {
-    lp_job_id: parseInt(raw.jobid),
+    lp_job_id: parseInt(raw.job_id || raw.jobid),
     customer_first: raw.firstname || '',
     customer_last: raw.lastname || '',
     address: raw.address1 || '',
