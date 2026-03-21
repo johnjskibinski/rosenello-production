@@ -38,10 +38,13 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
       return existing.data.files[0].id || null
     }
 
-    // Copy the template
+    // Copy the template into the target folder
     const copy = await drive.files.copy({
       fileId: TEMPLATE_SHEET_ID,
-      requestBody: { name: sheetTitle },
+      requestBody: {
+        name: sheetTitle,
+        parents: [process.env.GOOGLE_DRIVE_FOLDER_ID || '1ZWQoi0_ZV2-K2UeuGXQUnYNouUTes3V2'],
+      },
     })
     const newSheetId = copy.data.id!
 
