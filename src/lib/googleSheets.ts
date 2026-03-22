@@ -1,23 +1,18 @@
 import { google } from 'googleapis'
 
 const TEMPLATE_SHEET_ID = '1WfdoSeTwr-nt-8OF6eBRs72YZ8kjQzEDf00xkmzH2Ws'
+const DRIVE_FOLDER_ID = '1ZWQoi0_ZV2-K2UeuGXQUnYNouUTes3V2'
 
 function getAuth() {
-  let rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
-  if (!rawJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not set')
-  rawJson = rawJson.trim()
-  if (rawJson.startsWith("'") && rawJson.endsWith("'")) rawJson = rawJson.slice(1, -1)
-  if (rawJson.startsWith('"') && rawJson.endsWith('"')) rawJson = rawJson.slice(1, -1)
-  rawJson = rawJson.replace(/\\n/g, '\\n')
-  const creds = JSON.parse(rawJson)
-  console.log("[Auth] Using service account:", creds.client_email)
-  return new google.auth.GoogleAuth({
-    credentials: creds,
-    scopes: [
-      'https://www.googleapis.com/auth/spreadsheets',
-      'https://www.googleapis.com/auth/drive',
-    ],
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    'urn:ietf:wg:oauth:2.0:oob'
+  )
+  oauth2Client.setCredentials({
+    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
   })
+  return oauth2Client
 }
 
 export async function createMeasureSheet(job: any): Promise<string | null> {
@@ -31,7 +26,7 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
 
     // Skip if sheet already exists
     const existing = await drive.files.list({
-      q: `name='${sheetTitle}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
+      q: `name='${sheetTitle}' and trashed=false`,
       fields: 'files(id, name)',
     })
     if (existing.data.files && existing.data.files.length > 0) {
@@ -39,18 +34,17 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
       return existing.data.files[0].id || null
     }
 
-    // Copy the template into the target folder
+    // Copy the template into the Rosenello Measure Sheets folder
     const copy = await drive.files.copy({
       fileId: TEMPLATE_SHEET_ID,
       requestBody: {
         name: sheetTitle,
-
+        parents: [DRIVE_FOLDER_ID],
       },
     })
     const newSheetId = copy.data.id!
 
     const d = job.raw_lp_data || {}
-
     const address = [d.address1, d.city, d.state, d.zip].filter(Boolean).join(', ')
     const humanJobId = d.contractid || job.contract_id || ''
     const numericJobId = job.lp_job_id
@@ -58,7 +52,6 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
     const gross = parseFloat(d.grossamount || job.gross_amount || 0)
     const balance = parseFloat(d.balancedue || job.balance_due || 0)
 
-    // Fill in the Costing tab
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: newSheetId,
       requestBody: {
@@ -75,25 +68,10 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
       },
     })
 
-    // Make the sheet public (anyone with the link can view)
-    await drive.permissions.create({
-      fileId: newSheetId,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone',
-      },
-    })
-
-    const sheetUrl = `https://docs.google.com/spreadsheets/d/${newSheetId}`
-    console.log(`Created measure sheet for ${customerName}: ${sheetUrl}`)
+    console.log(`Created measure sheet for ${customerName}: https://docs.google.com/spreadsheets/d/${newSheetId}`)
     return newSheetId
-  } catch (err) {
-    const errData = (err as any)?.response?.data?.error
-    console.error(`Failed to create measure sheet for job ${job.lp_job_id}:`, JSON.stringify({
-      message: (err as any)?.message,
-      cause: (err as any)?.cause,
-      responseError: errData,
-    }, null, 2))
+  } catch (err: any) {
+    console.error(`Failed to create measure sheet for job ${job.lp_job_id}:`, err?.message || err)
     return null
   }
 }
