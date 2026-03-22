@@ -61,32 +61,18 @@ router.get('/', async (_, res) => {
   res.json(data);
 });
 
+router.patch('/:lp_job_id/status', async (req, res) => {
+  const { lp_job_id } = req.params;
+  const { status } = req.body;
+  if (!status) return res.status(400).json({ error: 'status required' });
+  const { data, error } = await supabase
+    .from('jobs')
+    .update({ lp_status: status, last_synced_at: new Date().toISOString() })
+    .eq('lp_job_id', lp_job_id)
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 export default router;
-
-router.patch('/:lp_job_id/status', async (req, res) => {
-  const { lp_job_id } = req.params
-  const { status } = req.body
-  if (!status) return res.status(400).json({ error: 'status required' })
-  const { data, error } = await supabase
-    .from('jobs')
-    .update({ lp_status: status, last_synced_at: new Date().toISOString() })
-    .eq('lp_job_id', lp_job_id)
-    .select()
-    .single()
-  if (error) return res.status(500).json({ error: error.message })
-  res.json(data)
-})
-
-router.patch('/:lp_job_id/status', async (req, res) => {
-  const { lp_job_id } = req.params
-  const { status } = req.body
-  if (!status) return res.status(400).json({ error: 'status required' })
-  const { data, error } = await supabase
-    .from('jobs')
-    .update({ lp_status: status, last_synced_at: new Date().toISOString() })
-    .eq('lp_job_id', lp_job_id)
-    .select()
-    .single()
-  if (error) return res.status(500).json({ error: error.message })
-  res.json(data)
-})
