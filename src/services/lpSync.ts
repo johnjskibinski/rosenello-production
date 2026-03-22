@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { createMeasureSheet } from '../lib/googleSheets'
 
 const ACTIVE_STATUSES = ['SN','PU','SS','MR','D','B','1','2','3','NS','SV','S','5','T','SI','CM','U']
-const MEASURE_SHEET_STATUSES = ['SN', 'PU']
+const MEASURE_SHEET_STATUSES = ['SN', 'PU', 'SS']
 
 function mapJob(raw: any) {
   return {
