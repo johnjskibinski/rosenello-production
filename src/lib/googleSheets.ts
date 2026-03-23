@@ -130,8 +130,8 @@ export async function readWorkOrderRows(sheetUrl: string): Promise<string[] | nu
 
     const rows = result.data.values || []
     return rows
-      .map((r: any[]) => (r[0] || '').toString().trim())
-      .filter((v: string) => v.length > 0)
+      .map((r: any[]) => [r[0] || ''].map((v: any) => v.toString().trim()))
+      .filter((r: string[]) => r[0].length > 0)
   } catch (err: any) {
     console.error('readWorkOrderRows error:', err?.message || err)
     return null
