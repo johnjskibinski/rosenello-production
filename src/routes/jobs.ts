@@ -296,3 +296,40 @@ router.post('/:lp_job_id/refresh-totals', async (req, res) => {
 
   res.json({ success: true, totals })
 })
+
+// ── Refresh all sheet data (totals + work order rows) ─────────────────────────
+router.post('/:lp_job_id/refresh-sheet', async (req, res) => {
+  const { lp_job_id } = req.params
+
+  const { data: job, error } = await supabase
+    .from('jobs')
+    .select('measure_sheet_url')
+    .eq('lp_job_id', lp_job_id)
+    .single()
+
+  if (error || !job) return res.status(404).json({ error: 'Job not found' })
+  if (!job.measure_sheet_url) return res.status(400).json({ error: 'No measure sheet' })
+
+  const { readProjectTotals, readWorkOrderRows } = await import('../lib/googleSheets')
+  const [totals, workOrderRows] = await Promise.all([
+    readProjectTotals(job.measure_sheet_url),
+    readWorkOrderRows(job.measure_sheet_url),
+  ])
+
+  const update: any = {}
+  if (totals) Object.assign(update, totals)
+  if (workOrderRows) update.work_order_rows = workOrderRows
+
+  if (Object.keys(update).length === 0) {
+    return res.status(500).json({ error: 'Could not read any sheet data' })
+  }
+
+  const { error: dbErr } = await supabase
+    .from('jobs')
+    .update(update)
+    .eq('lp_job_id', lp_job_id)
+
+  if (dbErr) return res.status(500).json({ error: dbErr.message })
+
+  res.json({ success: true, lp_job_id, totals, workOrderRows })
+})
