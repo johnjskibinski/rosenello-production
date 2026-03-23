@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cron from 'node-cron';
 import { env } from './config/env';
+import kpiRouter from './routes/kpi';
 import jobRoutes from './routes/jobs';
 
 const app = express();
@@ -12,6 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
+app.use('/api/kpi', kpiRouter);
 app.use('/api/jobs', jobRoutes);
 
 // Sync Mon-Fri every 4 hours between 7am-7pm (Eastern)
