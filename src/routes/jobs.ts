@@ -161,11 +161,11 @@ async function uploadTabToLP(
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        job_id:    String(lpJobId),
-        imagename: `${tabName.replace(' ', '_')}_${contractId}.pdf`,
-        imagedata: base64Pdf,
-        imagetype: 'application/pdf',
-        doctypeid: cfg.docTypeId,
+        jobid:    Number(lpJobId),
+        filename: `${tabName.replace(' ', '_')}_${contractId}.pdf`,
+        filebytes: Array.from(pdfBuffer),
+        dtyid:    Number(cfg.docTypeId),
+        docdescr: tabName,
       }),
     })
 
