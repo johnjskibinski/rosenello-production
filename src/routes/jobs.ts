@@ -255,3 +255,29 @@ async function handleUploadDocs(req: any, res: any) {
 
 router.post('/:lp_job_id/upload-docs', handleUploadDocs)
 router.post('/:lp_job_id/upload-docs/:tabName', handleUploadDocs)
+
+router.post('/:lp_job_id/refresh-totals', async (req, res) => {
+  const { lp_job_id } = req.params
+
+  const { data: job, error } = await supabase
+    .from('jobs')
+    .select('measure_sheet_url')
+    .eq('lp_job_id', lp_job_id)
+    .single()
+
+  if (error || !job) return res.status(404).json({ error: 'Job not found' })
+  if (!job.measure_sheet_url) return res.status(400).json({ error: 'No measure sheet' })
+
+  const { readProjectTotals } = await import('../lib/googleSheets')
+  const totals = await readProjectTotals(job.measure_sheet_url)
+  if (!totals) return res.status(500).json({ error: 'Could not read sheet totals' })
+
+  const { error: dbErr } = await supabase
+    .from('jobs')
+    .update(totals)
+    .eq('lp_job_id', lp_job_id)
+
+  if (dbErr) return res.status(500).json({ error: dbErr.message })
+
+  res.json({ success: true, totals })
+})

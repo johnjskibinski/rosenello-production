@@ -75,3 +75,41 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
     return null
   }
 }
+
+export async function readProjectTotals(sheetUrl: string): Promise<Record<string, number> | null> {
+  try {
+    const match = sheetUrl.match(/\/d\/([\w-]+)/)
+    if (!match) return null
+    const sheetId = match[1]
+
+    const auth = getAuth()
+    const sheets = google.sheets({ version: 'v4', auth })
+
+    const result = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId: sheetId,
+      ranges: [
+        'Project Totals!O5',
+        'Project Totals!O6',
+        'Project Totals!O7',
+        'Project Totals!O8',
+        'Project Totals!O9',
+        'Project Totals!O10',
+      ],
+    })
+
+    const vals = result.data.valueRanges || []
+    const get = (i: number) => parseInt(vals[i]?.values?.[0]?.[0] || '0') || 0
+
+    return {
+      total_windows:  get(0),
+      total_doors:    get(1),
+      bay_windows:    get(2),
+      bow_windows:    get(3),
+      total_openings: get(4),
+      total_units:    get(5),
+    }
+  } catch (err: any) {
+    console.error('readProjectTotals error:', err?.message || err)
+    return null
+  }
+}
