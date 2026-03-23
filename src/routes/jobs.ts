@@ -182,7 +182,8 @@ async function uploadTabToLP(
 }
 
 router.post('/:lp_job_id/upload-docs/:tabName?', async (req, res) => {
-  const { lp_job_id, tabName } = req.params
+  const lp_job_id = req.params.lp_job_id
+  const tabName = req.params["tabName?"]
 
   try {
     // 1. Get job from Supabase
