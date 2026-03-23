@@ -114,7 +114,7 @@ export async function readProjectTotals(sheetUrl: string): Promise<Record<string
   }
 }
 
-export async function readWorkOrderRows(sheetUrl: string): Promise<string[] | null> {
+export async function readWorkOrderRows(sheetUrl: string): Promise<string[][] | null> {
   try {
     const match = sheetUrl.match(/\/d\/([\w-]+)/)
     if (!match) return null
