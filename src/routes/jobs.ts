@@ -66,6 +66,19 @@ router.patch('/:lp_job_id/status', async (req, res) => {
   res.json(data)
 })
 
+// Upload single doc to LP
+router.post('/:lp_job_id/upload-docs/:tab_name', async (req, res) => {
+  const lpJobId = parseInt(req.params.lp_job_id)
+  const tabName = req.params.tab_name
+  if (isNaN(lpJobId)) return res.status(400).json({ error: 'invalid lp_job_id' })
+  try {
+    const result = await uploadJobDocs(lpJobId, tabName)
+    res.json(result)
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // Upload all 5 docs to LP + read project totals + work order rows into DB
 router.post('/:lp_job_id/upload-docs', async (req, res) => {
   const lpJobId = parseInt(req.params.lp_job_id)

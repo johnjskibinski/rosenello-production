@@ -5,23 +5,19 @@ import { exportTabAsPdf, readProjectTotals, readWorkOrderRows } from '../lib/goo
 
 const LP_BASE_URL = 'https://api.leadperfection.com'
 
-// Doc type IDs and tab config from project spec
 const DOC_TYPES = [
-  { tabName: 'Costing',         docTypeId: 36, landscape: true,  displayName: 'Costing'        },
-  { tabName: 'Window Measure',  docTypeId: 16, landscape: true,  displayName: 'Window Measure'  },
-  { tabName: 'Work Order',      docTypeId: 26, landscape: false, displayName: 'Work Order'      },
-  { tabName: 'Checklist',       docTypeId: 37, landscape: false, displayName: 'Checklist'       },
-  { tabName: 'LaborCalc',       docTypeId: 35, landscape: false, displayName: 'Labor Calc'      },
+  { tabName: 'Costing',        docTypeId: 36, landscape: true,  displayName: 'Costing'       },
+  { tabName: 'Window Measure', docTypeId: 16, landscape: true,  displayName: 'Window Measure' },
+  { tabName: 'Work Order',     docTypeId: 26, landscape: false, displayName: 'Work Order'     },
+  { tabName: 'Checklist',      docTypeId: 37, landscape: false, displayName: 'Checklist'      },
+  { tabName: 'LaborCalc',      docTypeId: 35, landscape: false, displayName: 'Labor Calc'     },
 ]
 
 async function lpPostJson(path: string, body: any) {
   const token = await getLPToken()
   const response = await fetch(`${LP_BASE_URL}/api/${path}`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   if (!response.ok) {
@@ -36,8 +32,8 @@ function spreadsheetIdFromUrl(url: string): string | null {
   return m ? m[1] : null
 }
 
-export async function uploadJobDocs(lpJobId: number) {
-  // 1. Fetch job from DB
+// tabName is optional — if provided, only that tab is uploaded
+export async function uploadJobDocs(lpJobId: number, tabName?: string) {
   const { data: job, error } = await supabase
     .from('jobs')
     .select('*')
@@ -52,24 +48,28 @@ export async function uploadJobDocs(lpJobId: number) {
 
   const customerName = `${job.customer_first} ${job.customer_last}`.trim()
 
-  // 2. Upload all 5 tabs as PDFs to LP
+  // Filter to single tab if specified
+  const docsToUpload = tabName
+    ? DOC_TYPES.filter(d => d.tabName === tabName)
+    : DOC_TYPES
+
+  if (tabName && docsToUpload.length === 0)
+    throw new Error(`Unknown tab: ${tabName}. Valid tabs: ${DOC_TYPES.map(d => d.tabName).join(', ')}`)
+
   const results: { tabName: string; ok: boolean; message?: string }[] = []
 
-  for (const doc of DOC_TYPES) {
+  for (const doc of docsToUpload) {
     try {
       console.log(`[Upload] Exporting "${doc.tabName}" for job ${lpJobId}...`)
       const pdfBuffer = await exportTabAsPdf(spreadsheetId, doc.tabName, doc.landscape)
-
-      // Convert to unsigned byte array (ported from legacy app)
       const uints = Array.from(pdfBuffer).map(b => (b < 0 ? b + 256 : b))
-
       const filename = `${customerName} - ${doc.tabName}.pdf`
 
       await lpPostJson('SalesApi/AddJobImages', {
-        jobid:    lpJobId,
-        filename: filename,
-        docdescr: doc.displayName,
-        dtyid:    doc.docTypeId,
+        jobid:     lpJobId,
+        filename:  filename,
+        docdescr:  doc.displayName,
+        dtyid:     doc.docTypeId,
         filebytes: uints,
       })
 
@@ -81,47 +81,35 @@ export async function uploadJobDocs(lpJobId: number) {
     }
   }
 
-  // 3. Read Project Totals (O5:O10) from sheet
+  // Only read totals + work order rows on full upload or first time
   let totals = {
     total_windows: 0, total_doors: 0, bay_windows: 0,
     bow_windows: 0, total_openings: 0, total_units: 0,
   }
-  try {
-    totals = await readProjectTotals(spreadsheetId)
-    console.log(`[Upload] Project totals for job ${lpJobId}:`, totals)
-  } catch (err: any) {
-    console.error(`[Upload] Failed to read project totals:`, err.message)
-  }
-
-  // 4. Read Work Order rows 16–25
   let workOrderRows: any[][] = []
-  try {
-    workOrderRows = await readWorkOrderRows(spreadsheetId)
-    console.log(`[Upload] Work order rows read: ${workOrderRows.length} rows`)
-  } catch (err: any) {
-    console.error(`[Upload] Failed to read work order rows:`, err.message)
+
+  if (!tabName) {
+    try { totals = await readProjectTotals(spreadsheetId) } catch (e: any) {
+      console.error(`[Upload] Failed to read project totals:`, e.message)
+    }
+    try { workOrderRows = await readWorkOrderRows(spreadsheetId) } catch (e: any) {
+      console.error(`[Upload] Failed to read work order rows:`, e.message)
+    }
   }
 
-  // 5. Persist everything to DB
   const anyOk = results.some(r => r.ok)
-  const { error: updateError } = await supabase
-    .from('jobs')
-    .update({
-      ...totals,
-      work_order_rows: workOrderRows,
-      ...(anyOk ? { docs_uploaded_at: new Date().toISOString() } : {}),
-      last_synced_at: new Date().toISOString(),
-    })
-    .eq('lp_job_id', lpJobId)
-
-  if (updateError) {
-    console.error(`[Upload] DB update failed:`, updateError)
+  const updatePayload: any = { last_synced_at: new Date().toISOString() }
+  if (anyOk) updatePayload.docs_uploaded_at = new Date().toISOString()
+  if (!tabName) {
+    Object.assign(updatePayload, totals)
+    updatePayload.work_order_rows = workOrderRows
   }
+
+  await supabase.from('jobs').update(updatePayload).eq('lp_job_id', lpJobId)
 
   return {
     ok: results.every(r => r.ok),
     results,
-    totals,
-    workOrderRowCount: workOrderRows.length,
+    ...(tabName ? {} : { totals, workOrderRowCount: workOrderRows.length }),
   }
 }
