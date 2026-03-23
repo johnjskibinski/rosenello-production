@@ -181,9 +181,9 @@ async function uploadTabToLP(
   }
 }
 
-router.post('/:lp_job_id/upload-docs/:tabName?', async (req, res) => {
+async function handleUploadDocs(req: any, res: any) {
   const lp_job_id = req.params.lp_job_id
-  const tabName = (req.params as any).tabName as string | undefined
+  const tabName: string | undefined = req.params.tabName
 
   try {
     // 1. Get job from Supabase
@@ -251,4 +251,7 @@ router.post('/:lp_job_id/upload-docs/:tabName?', async (req, res) => {
     console.error('[upload-docs] error:', err)
     res.status(500).json({ error: err.message })
   }
-})
+}
+
+router.post('/:lp_job_id/upload-docs', handleUploadDocs)
+router.post('/:lp_job_id/upload-docs/:tabName', handleUploadDocs)
