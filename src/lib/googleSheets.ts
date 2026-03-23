@@ -113,3 +113,27 @@ export async function readProjectTotals(sheetUrl: string): Promise<Record<string
     return null
   }
 }
+
+export async function readWorkOrderRows(sheetUrl: string): Promise<string[] | null> {
+  try {
+    const match = sheetUrl.match(/\/d\/([\w-]+)/)
+    if (!match) return null
+    const sheetId = match[1]
+
+    const auth = getAuth()
+    const sheets = google.sheets({ version: 'v4', auth })
+
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: 'Work Order!A16:A25',
+    })
+
+    const rows = result.data.values || []
+    return rows
+      .map((r: any[]) => (r[0] || '').toString().trim())
+      .filter((v: string) => v.length > 0)
+  } catch (err: any) {
+    console.error('readWorkOrderRows error:', err?.message || err)
+    return null
+  }
+}

@@ -247,6 +247,21 @@ async function handleUploadDocs(req: any, res: any) {
     }
 
     res.json({ ok: allOk, results })
+
+    // Refresh sheet-derived data in background
+    if (job.measure_sheet_url) {
+      const { readProjectTotals, readWorkOrderRows } = await import('../lib/googleSheets')
+      const [totals, workOrderRows] = await Promise.all([
+        readProjectTotals(job.measure_sheet_url),
+        readWorkOrderRows(job.measure_sheet_url),
+      ])
+      const sheetUpdate: any = {}
+      if (totals) Object.assign(sheetUpdate, totals)
+      if (workOrderRows) sheetUpdate.work_order_rows = workOrderRows
+      if (Object.keys(sheetUpdate).length > 0) {
+        await supabase.from('jobs').update(sheetUpdate).eq('lp_job_id', lp_job_id)
+      }
+    }
   } catch (err: any) {
     console.error('[upload-docs] error:', err)
     res.status(500).json({ error: err.message })
