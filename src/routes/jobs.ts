@@ -315,3 +315,43 @@ router.post('/:lp_job_id/refresh-sheet', async (req, res) => {
 
   res.json({ success: true, lp_job_id, totals, workOrderRows })
 })
+
+// ── Notes ─────────────────────────────────────────────────────────────────────
+
+router.get('/:lp_job_id/notes', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { data, error } = await supabase
+    .from('job_notes')
+    .select('*')
+    .eq('lp_job_id', lp_job_id)
+    .order('created_at', { ascending: false })
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
+
+router.post('/:lp_job_id/notes', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { note, author = 'John' } = req.body
+  if (!note?.trim()) return res.status(400).json({ error: 'note is required' })
+
+  let lpSynced = false
+  try {
+    await lpPost('SalesApi/AddNotes', {
+      rectype: 'job',
+      recid: lp_job_id,
+      notes: note.trim(),
+    })
+    lpSynced = true
+  } catch (lpErr: any) {
+    console.error('[notes] LP write failed:', lpErr.message)
+  }
+
+  const { data, error } = await supabase
+    .from('job_notes')
+    .insert({ lp_job_id: parseInt(lp_job_id), note: note.trim(), author, lp_synced: lpSynced })
+    .select()
+    .single()
+  if (error) return res.status(500).json({ error: error.message })
+
+  res.json({ ...data, lp_synced: lpSynced })
+})
