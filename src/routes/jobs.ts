@@ -81,7 +81,7 @@ router.patch('/:lp_job_id/status', async (req, res) => {
       JSON.stringify([{ ajax: 'GetJobDetail', options: '0', term: 'get', jobid: lp_job_id, format: 'jsondata' }])
     )
     const getRes = await fetch(getUrl, { headers: { Cookie: `LPToken=${token}` } })
-    const jobData = await getRes.json()
+    const jobData = await getRes.json() as any
     const j = (jobData.Records && jobData.Records[0]) ? jobData.Records[0] : (Array.isArray(jobData) ? jobData[0] : jobData)
 
     if (!j || !j.id) throw new Error('GetJobDetail returned no data for job ' + lp_job_id)
@@ -168,7 +168,7 @@ router.patch('/:lp_job_id/status', async (req, res) => {
 
     const saveUrl = 'https://e5d8a.leadperfection.com/djson.aspx?' + encodeURIComponent(JSON.stringify(savePayload))
     const saveRes = await fetch(saveUrl, { headers: { Cookie: `LPToken=${token}` } })
-    const saveData = await saveRes.json()
+    const saveData = await saveRes.json() as any
     console.log('[status-update] LP SaveJobDetail:', JSON.stringify(saveData).slice(0, 200))
     if (saveData.Result && saveData.Result !== 'OK') {
       throw new Error('LP SaveJobDetail failed: ' + JSON.stringify(saveData).slice(0, 200))
