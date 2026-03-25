@@ -82,7 +82,7 @@ router.post('/events', async (req, res) => {
 
         const workOrderLines = Array.isArray(job.work_order_rows)
           ? job.work_order_rows
-              .map((row: any[]) => row.filter(Boolean).join(' ').trim())
+              .map((row: any[]) => Array.isArray(row) ? String(row[0] || '').trim() : String(row || '').trim())
               .filter(Boolean)
               .join('\n')
           : ''
@@ -93,13 +93,6 @@ router.post('/events', async (req, res) => {
           workOrderLines,
           notes || '',
         ].filter(Boolean)
-
-        if (measure_sheet_url && (event_type === 'measure' || event_type === 'install')) {
-          parts.push(`📋 Measure Packet:\n<${measure_sheet_url}>`)
-        }
-        if (companycam_url && (event_type === 'measure' || event_type === 'install')) {
-          parts.push(`📸 CompanyCam:\n<${companycam_url}>`)
-        }
 
         autoDescription = parts.join('\n\n')
       }
