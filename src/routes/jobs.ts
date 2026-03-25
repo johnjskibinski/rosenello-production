@@ -409,3 +409,28 @@ router.post('/:lp_job_id/resolve-companycam', async (req, res) => {
 
   res.json({ ok: true, projectId, ...updated })
 })
+
+// ── Manual CompanyCam link override ──────────────────────────────────────────
+
+router.patch('/:lp_job_id/companycam-link', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { companycam_project_id } = req.body
+
+  if (!companycam_project_id) return res.status(400).json({ error: 'companycam_project_id required' })
+
+  const projectUrl = `https://app.companycam.com/projects/${companycam_project_id}`
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .update({
+      companycam_project_id,
+      companycam_url: projectUrl,
+      companycam_checked_at: new Date().toISOString(),
+    })
+    .eq('lp_job_id', lp_job_id)
+    .select('lp_job_id, companycam_project_id, companycam_url, companycam_checked_at')
+    .single()
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
