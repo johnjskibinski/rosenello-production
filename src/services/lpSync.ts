@@ -1,6 +1,7 @@
 import { lpPost } from '../lib/lpClient'
 import { supabase } from '../lib/supabase'
 import { createMeasureSheet } from '../lib/googleSheets'
+import { resolveCompanyCamProject } from './companyCam'
 
 const ACTIVE_STATUSES = ['SN','PU','SS','MR','D','B','1','2','3','NS','SV','S','5','T','SI','CM','U']
 const MEASURE_SHEET_STATUSES = ['SN', 'PU', 'SS']
@@ -107,6 +108,22 @@ export async function syncActiveJobs() {
       }
     }
   }
+
+  // Async CC resolution — non-blocking, runs after main sync
+  supabase
+    .from('jobs')
+    .select('lp_job_id, customer_first, customer_last, address, city, state, zip, contract_date')
+    .is('companycam_project_id', null)
+    .is('companycam_checked_at', null)
+    .then(({ data: jobsNeedingCC }) => {
+      if (!jobsNeedingCC || !jobsNeedingCC.length) return
+      console.log('[CC] Resolving ' + jobsNeedingCC.length + ' jobs')
+      Promise.allSettled(jobsNeedingCC.map(job => resolveCompanyCamProject(job)))
+        .then(results => {
+          const resolved = results.filter(r => r.status === 'fulfilled' && r.value).length
+          console.log('[CC] Resolved ' + resolved + '/' + jobsNeedingCC.length + ' projects')
+        })
+    })
 
   return { totalSynced, totalErrors, sheetsCreated }
 }

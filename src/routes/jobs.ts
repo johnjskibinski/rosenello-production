@@ -355,3 +355,57 @@ router.post('/:lp_job_id/notes', async (req, res) => {
 
   res.json({ ...data, lp_synced: lpSynced })
 })
+
+// ── CompanyCam ────────────────────────────────────────────────────────────────
+
+router.post('/backfill-companycam', async (req, res) => {
+  const { resolveCompanyCamProject } = await import('../services/companyCam')
+  const { data: jobs, error } = await supabase
+    .from('jobs')
+    .select('lp_job_id, customer_first, customer_last, address, city, state, zip, contract_date')
+    .is('companycam_project_id', null)
+
+  if (error) return res.status(500).json({ error: error.message })
+  if (!jobs || !jobs.length) return res.json({ ok: true, message: 'No jobs need CC resolution', count: 0 })
+
+  res.json({ ok: true, message: 'Backfill started for ' + jobs.length + ' jobs', count: jobs.length })
+
+  ;(async () => {
+    let resolved = 0
+    for (let i = 0; i < jobs.length; i += 10) {
+      const batch = jobs.slice(i, i + 10)
+      const results = await Promise.allSettled(batch.map(j => resolveCompanyCamProject(j)))
+      resolved += results.filter(r => r.status === 'fulfilled' && (r as any).value).length
+      if (i + 10 < jobs.length) await new Promise(r => setTimeout(r, 500))
+    }
+    console.log('[CC backfill] Complete: ' + resolved + '/' + jobs.length)
+  })()
+})
+
+router.post('/:lp_job_id/resolve-companycam', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { resolveCompanyCamProject } = await import('../services/companyCam')
+
+  await supabase
+    .from('jobs')
+    .update({ companycam_project_id: null, companycam_url: null, companycam_checked_at: null })
+    .eq('lp_job_id', lp_job_id)
+
+  const { data: job, error } = await supabase
+    .from('jobs')
+    .select('lp_job_id, customer_first, customer_last, address, city, state, zip, contract_date')
+    .eq('lp_job_id', lp_job_id)
+    .single()
+
+  if (error || !job) return res.status(404).json({ error: 'Job not found' })
+
+  const projectId = await resolveCompanyCamProject(job)
+
+  const { data: updated } = await supabase
+    .from('jobs')
+    .select('companycam_project_id, companycam_url, companycam_checked_at')
+    .eq('lp_job_id', lp_job_id)
+    .single()
+
+  res.json({ ok: true, projectId, ...updated })
+})
