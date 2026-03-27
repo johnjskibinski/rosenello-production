@@ -43,8 +43,8 @@ export async function getLPWebSession(): Promise<string> {
       __VIEWSTATE: viewstateMatch[1],
       __VIEWSTATEGENERATOR: viewstateGenMatch?.[1] ?? '',
       __EVENTVALIDATION: eventValMatch?.[1] ?? '',
-      txtUserName: process.env.LP_WEB_USERNAME,
-      txtPassword: process.env.LP_WEB_PASSWORD,
+      username: process.env.LP_WEB_USERNAME,
+      password: process.env.LP_WEB_PASSWORD,
       btnLogin: 'Login',
     }),
     {
