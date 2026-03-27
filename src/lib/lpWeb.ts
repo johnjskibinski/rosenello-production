@@ -16,33 +16,57 @@ export async function getLPWebSession(): Promise<string> {
     return sessionCache.cookie
   }
 
-  console.log('[LPWeb] Logging in to LP web...')
+  console.log('[LPWeb] Fetching login page for VIEWSTATE...')
 
-  const resp = await axios.get(`${LP_WEB_BASE}/djson.aspx`, {
-    params: {
-      '': JSON.stringify([{
-        ajax: 'SecureLogin',
-        options: '0',
-        term: 'get',
-        format: 'jsondata',
-        data: [{
-          username: process.env.LP_WEB_USERNAME,
-          password: process.env.LP_WEB_PASSWORD,
-        }]
-      }])
-    },
+  // Step 1: GET default.aspx to get __VIEWSTATE
+  const getResp = await axios.get(`${LP_WEB_BASE}/default.aspx`, {
     maxRedirects: 0,
     validateStatus: (s) => s < 600,
   })
 
-  const setCookie = resp.headers['set-cookie']
-  if (!setCookie?.length) {
-    throw new Error('[LPWeb] No session cookie returned — check LP_WEB_USERNAME / LP_WEB_PASSWORD')
+  const viewstateMatch = getResp.data?.match(/id="__VIEWSTATE"\s+value="([^"]+)"/)
+  const viewstateGenMatch = getResp.data?.match(/id="__VIEWSTATEGENERATOR"\s+value="([^"]+)"/)
+
+  if (!viewstateMatch) throw new Error('[LPWeb] Could not extract __VIEWSTATE from login page')
+
+  const viewstate = viewstateMatch[1]
+  const viewstateGen = viewstateGenMatch?.[1] ?? ''
+
+  // Collect any initial cookies
+  const initialCookies = (getResp.headers['set-cookie'] ?? [])
+    .map((c: string) => c.split(';')[0]).join('; ')
+
+  console.log('[LPWeb] Posting login credentials...')
+
+  // Step 2: POST credentials
+  const postResp = await axios.post(
+    `${LP_WEB_BASE}/default.aspx`,
+    qs.stringify({
+      __VIEWSTATE: viewstate,
+      __VIEWSTATEGENERATOR: viewstateGen,
+      txtUserName: process.env.LP_WEB_USERNAME,
+      txtPassword: process.env.LP_WEB_PASSWORD,
+      btnLogin: 'Login',
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': initialCookies,
+      },
+      maxRedirects: 0,
+      validateStatus: (s) => s < 600,
+    }
+  )
+
+  const setCookies = postResp.headers['set-cookie'] ?? []
+  if (!setCookies.length) {
+    throw new Error('[LPWeb] Login failed — no cookies returned. Check LP_WEB_USERNAME / LP_WEB_PASSWORD')
   }
 
-  const cookie = setCookie.map((c: string) => c.split(';')[0]).join('; ')
+  const cookie = setCookies.map((c: string) => c.split(';')[0]).join('; ')
+  console.log('[LPWeb] Session established, cookie keys:', cookie.split(';').map((c: string) => c.split('=')[0].trim()))
+
   sessionCache = { cookie, expiresAt: Date.now() + 60 * 60 * 1000 }
-  console.log('[LPWeb] Session established')
   return cookie
 }
 
@@ -56,9 +80,11 @@ export async function lpWebGet(ajaxAction: string, extra: Record<string, any> = 
     validateStatus: (s) => s < 600,
   })
 
+  if (resp.status === 401 || resp.status === 403) {
+    sessionCache = null
+    throw new Error(`[LPWeb] ${ajaxAction} auth failed HTTP ${resp.status} — session cleared`)
+  }
   if (resp.status >= 400) {
-    // Clear session cache on auth failure so next call re-logs in
-    if (resp.status === 401 || resp.status === 403) sessionCache = null
     throw new Error(`[LPWeb] ${ajaxAction} HTTP ${resp.status}: ${JSON.stringify(resp.data).slice(0, 200)}`)
   }
   return resp.data
