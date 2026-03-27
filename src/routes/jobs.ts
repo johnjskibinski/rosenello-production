@@ -2,7 +2,6 @@ import { Router } from 'express'
 import { syncActiveJobs } from '../services/lpSync'
 import { supabase } from '../lib/supabase'
 import { lpPost, getLPToken } from '../lib/lpClient'
-import { lpSaveJobStatus } from '../lib/lpWeb'
 
 const router = Router()
 
@@ -56,27 +55,14 @@ router.patch('/:lp_job_id/status', async (req, res) => {
   const { status } = req.body
   if (!status) return res.status(400).json({ error: 'status required' })
 
-  // 1. Push to LP via djson.aspx SaveJobDetail
-  let lpResult: any = null
-  let lpError: string | null = null
-  try {
-    lpResult = await lpSaveJobStatus(lp_job_id, status)
-  } catch (err: any) {
-    lpError = err.message
-    console.error('[jobs] LP write-back failed:', err.message)
-  }
-
-  // 2. Always update Supabase regardless of LP result
   const { data, error } = await supabase
     .from('jobs')
     .update({ lp_status: status, last_synced_at: new Date().toISOString() })
     .eq('lp_job_id', lp_job_id)
     .select()
-    .single()
 
   if (error) return res.status(500).json({ error: error.message })
-
-  res.json({ ...data, lp_sync: lpError ? { success: false, error: lpError } : { success: true, result: lpResult } })
+  res.json(data?.[0] ?? { lp_job_id, status, updated: false })
 })
 
 export default router
