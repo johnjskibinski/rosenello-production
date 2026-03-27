@@ -41,6 +41,28 @@ router.post('/sync', async (_, res) => {
   }
 })
 
+// Search endpoint — searches all active jobs across all statuses
+router.get('/search', async (req, res) => {
+  const q = String(req.query.q || '').trim()
+  if (!q) return res.json([])
+
+  try {
+    const term = `%${q}%`
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('id, lp_job_id, customer_first, customer_last, address, city, state, zip, lp_status, lp_status_label, product, gross_amount, balance_due, installer_1, installer_2, contract_date, total_windows, total_doors, total_units, work_order_rows, measure_sheet_url, companycam_url, raw_lp_data')
+      .or(`customer_last.ilike.${term},customer_first.ilike.${term},address.ilike.${term},city.ilike.${term},contract_id.ilike.${term}`)
+      .not('lp_status', 'in', '("C","P","E","X","G","J","L")')
+      .order('customer_last', { ascending: true })
+      .limit(25)
+
+    if (error) throw error
+    res.json(data || [])
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 router.get('/', async (_, res) => {
   const { data, error } = await supabase
     .from('jobs')
