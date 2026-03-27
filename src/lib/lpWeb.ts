@@ -16,34 +16,33 @@ export async function getLPWebSession(): Promise<string> {
     return sessionCache.cookie
   }
 
-  console.log('[LPWeb] Fetching login page for VIEWSTATE...')
+  console.log('[LPWeb] Fetching LP login page...')
 
-  // Step 1: GET default.aspx to get __VIEWSTATE
-  const getResp = await axios.get(`${LP_WEB_BASE}/default.aspx`, {
-    maxRedirects: 0,
+  // Step 1: GET Login.aspx to extract VIEWSTATE + EVENTVALIDATION
+  const getResp = await axios.get(`${LP_WEB_BASE}/Login.aspx`, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
     validateStatus: (s) => s < 600,
   })
 
-  const viewstateMatch = getResp.data?.match(/id="__VIEWSTATE"\s+value="([^"]+)"/)
-  const viewstateGenMatch = getResp.data?.match(/id="__VIEWSTATEGENERATOR"\s+value="([^"]+)"/)
+  const html = getResp.data as string
+  const viewstateMatch = html.match(/id="__VIEWSTATE"\s+value="([^"]+)"/)
+  const viewstateGenMatch = html.match(/id="__VIEWSTATEGENERATOR"\s+value="([^"]+)"/)
+  const eventValMatch = html.match(/id="__EVENTVALIDATION"\s+value="([^"]+)"/)
 
-  if (!viewstateMatch) throw new Error('[LPWeb] Could not extract __VIEWSTATE from login page')
+  if (!viewstateMatch) throw new Error('[LPWeb] Could not extract __VIEWSTATE from Login.aspx')
 
-  const viewstate = viewstateMatch[1]
-  const viewstateGen = viewstateGenMatch?.[1] ?? ''
-
-  // Collect any initial cookies
   const initialCookies = (getResp.headers['set-cookie'] ?? [])
     .map((c: string) => c.split(';')[0]).join('; ')
 
-  console.log('[LPWeb] Posting login credentials...')
+  console.log('[LPWeb] Posting credentials...')
 
   // Step 2: POST credentials
   const postResp = await axios.post(
-    `${LP_WEB_BASE}/default.aspx`,
+    `${LP_WEB_BASE}/Login.aspx`,
     qs.stringify({
-      __VIEWSTATE: viewstate,
-      __VIEWSTATEGENERATOR: viewstateGen,
+      __VIEWSTATE: viewstateMatch[1],
+      __VIEWSTATEGENERATOR: viewstateGenMatch?.[1] ?? '',
+      __EVENTVALIDATION: eventValMatch?.[1] ?? '',
       txtUserName: process.env.LP_WEB_USERNAME,
       txtPassword: process.env.LP_WEB_PASSWORD,
       btnLogin: 'Login',
@@ -51,21 +50,28 @@ export async function getLPWebSession(): Promise<string> {
     {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0',
         'Cookie': initialCookies,
       },
-      maxRedirects: 0,
+      maxRedirects: 5,
       validateStatus: (s) => s < 600,
     }
   )
 
   const setCookies = postResp.headers['set-cookie'] ?? []
-  if (!setCookies.length) {
-    throw new Error('[LPWeb] Login failed — no cookies returned. Check LP_WEB_USERNAME / LP_WEB_PASSWORD')
+  const cookie = setCookies.map((c: string) => c.split(';')[0]).join('; ')
+
+  if (!cookie || !cookie.includes('=')) {
+    throw new Error('[LPWeb] Login failed — no session cookie. Check LP_WEB_USERNAME / LP_WEB_PASSWORD')
   }
 
-  const cookie = setCookies.map((c: string) => c.split(';')[0]).join('; ')
-  console.log('[LPWeb] Session established, cookie keys:', cookie.split(';').map((c: string) => c.split('=')[0].trim()))
+  // Verify we actually landed on the dashboard, not back on Login.aspx
+  const landingUrl = postResp.request?.res?.responseUrl ?? ''
+  if (landingUrl.includes('Login.aspx')) {
+    throw new Error('[LPWeb] Login failed — redirected back to login page. Check credentials.')
+  }
 
+  console.log('[LPWeb] Session established, cookies:', setCookies.length)
   sessionCache = { cookie, expiresAt: Date.now() + 60 * 60 * 1000 }
   return cookie
 }
@@ -76,13 +82,16 @@ export async function lpWebGet(ajaxAction: string, extra: Record<string, any> = 
 
   const resp = await axios.get(`${LP_WEB_BASE}/djson.aspx`, {
     params: { '': query },
-    headers: { Cookie: cookie },
+    headers: {
+      Cookie: cookie,
+      'User-Agent': 'Mozilla/5.0',
+    },
     validateStatus: (s) => s < 600,
   })
 
   if (resp.status === 401 || resp.status === 403) {
     sessionCache = null
-    throw new Error(`[LPWeb] ${ajaxAction} auth failed HTTP ${resp.status} — session cleared`)
+    throw new Error(`[LPWeb] ${ajaxAction} auth failed HTTP ${resp.status} — session cleared, will retry`)
   }
   if (resp.status >= 400) {
     throw new Error(`[LPWeb] ${ajaxAction} HTTP ${resp.status}: ${JSON.stringify(resp.data).slice(0, 200)}`)
