@@ -39,7 +39,6 @@ router.post('/events', async (req, res) => {
     return res.status(400).json({ error: 'event_type, start_time, end_time required' })
   }
 
-  // Pull job data to auto-fill description if lp_job_id provided
   let autoTitle = title
   let autoDescription = description
   let autoLocation = location
@@ -54,7 +53,6 @@ router.post('/events', async (req, res) => {
       .single()
 
     if (job) {
-      // Auto-build title if not provided
       if (!autoTitle) {
         const lastName = job.customer_last || ''
         const firstName = job.customer_first || ''
@@ -63,12 +61,10 @@ router.post('/events', async (req, res) => {
         autoTitle = `${crewPrefix}${customerPart}`
       }
 
-      // Auto-build location
       if (!autoLocation) {
         autoLocation = [job.address, job.city, job.state, job.zip].filter(Boolean).join(', ')
       }
 
-      // Auto-build description
       companycam_url = job.companycam_url
       measure_sheet_url = job.measure_sheet_url
 
@@ -87,23 +83,14 @@ router.post('/events', async (req, res) => {
               .join('\n')
           : ''
 
-        const parts = [
-          phone,
-          typeLabel,
-          workOrderLines,
-          notes || '',
-        ].filter(Boolean)
-
+        const parts = [phone, typeLabel, workOrderLines, notes || ''].filter(Boolean)
         autoDescription = parts.join('\n\n')
       }
     }
   }
 
   const colorMap: Record<string, string> = {
-    measure: '5',
-    install: '6',
-    service: '7',
-    reminder: '8',
+    measure: '5', install: '6', service: '7', reminder: '8',
   }
 
   const { data, error } = await supabase
@@ -157,6 +144,47 @@ router.delete('/events/:id', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message })
   res.json({ ok: true })
+})
+
+// GET /api/calendar/availability?start=&end=
+router.get('/availability', async (req, res) => {
+  const { start, end } = req.query
+  if (!start || !end) return res.status(400).json({ error: 'start and end required' })
+
+  const { data, error } = await supabase
+    .from('crew_availability')
+    .select('id, date, notes')
+    .gte('date', String(start).slice(0, 10))
+    .lte('date', String(end).slice(0, 10))
+    .order('date', { ascending: true })
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data || [])
+})
+
+// POST /api/calendar/availability  (upsert by date)
+router.post('/availability', async (req, res) => {
+  const { date, notes } = req.body
+  if (!date) return res.status(400).json({ error: 'date required' })
+
+  if (!notes || !notes.trim()) {
+    // If notes is empty, delete the record for that date
+    const { error } = await supabase
+      .from('crew_availability')
+      .delete()
+      .eq('date', date)
+    if (error) return res.status(500).json({ error: error.message })
+    return res.json({ deleted: true, date })
+  }
+
+  const { data, error } = await supabase
+    .from('crew_availability')
+    .upsert({ date, notes: notes.trim(), updated_at: new Date().toISOString() }, { onConflict: 'date' })
+    .select()
+    .single()
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
 })
 
 export default router
