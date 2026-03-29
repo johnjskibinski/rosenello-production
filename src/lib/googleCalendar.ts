@@ -28,19 +28,24 @@ export function eventTypeToColor(type: string): string {
 }
 
 // Normalize title from GCal to standard format given a matched job
-export function normalizeTitle(rawTitle: string, job: any): string {
+export function normalizeTitle(rawTitle: string, job: any, installers?: string[]): string {
   if (!job) return rawTitle
   const last = job.customer_last || ''
   const first = job.customer_first || ''
-  const installer = job.installer_1 || ''
-  const prefix = installer ? `(${installer}) ` : ''
+  const prefix = installers && installers.length > 0 ? `(${installers.join(', ')}) ` : ''
   return `${prefix}${last}, ${first}`.trim()
 }
 
-// Extract installer from title like "(Jay W) Smith, John"
+// Extract installers from title like "(Jay W, Ricardo) Smith, John"
 export function extractInstaller(title: string): string {
   const match = title.match(/^\(([^)]+)\)/)
   return match ? match[1] : ''
+}
+
+export function extractInstallers(title: string): string[] {
+  const match = title.match(/^\(([^)]+)\)/)
+  if (!match) return []
+  return match[1].split(',').map(s => s.trim()).filter(Boolean)
 }
 
 // Job type words to strip from titles before matching
@@ -202,8 +207,8 @@ export async function pullFromGCal(): Promise<{ synced: number; unlinked: number
       linked = !!job
       if (!linked) unlinked++
 
-      const title = job ? normalizeTitle(ev.summary || '', job) : (ev.summary || '')
-      const installer = extractInstaller(ev.summary || '')
+      const installerList = extractInstallers(ev.summary || '')
+      const title = job ? normalizeTitle(ev.summary || '', job, installerList) : (ev.summary || '')
 
       const row = {
         gcal_event_id: ev.id,
@@ -215,7 +220,8 @@ export async function pullFromGCal(): Promise<{ synced: number; unlinked: number
         all_day: allDay,
         location: ev.location || '',
         notes: ev.description || '',
-        installer,
+        installer: installerList[0] || '',
+        installers: installerList,
         color_id: colorId,
         linked,
         raw_gcal_data: ev,
@@ -235,7 +241,11 @@ export async function pushToGCal(event: any, job: any): Promise<string | null> {
   const cal = getCalendarClient()
 
   const gcalEvent: any = {
-    summary: event.title,
+    summary: (() => {
+      const instList: string[] = event.installers?.length ? event.installers : (event.installer ? [event.installer] : [])
+      const base = event.title?.replace(/^\([^)]+\)\s*/, '') || ''
+      return instList.length > 0 ? `(${instList.join(', ')}) ${base}` : base
+    })(),
     location: event.location || '',
     description: event.notes || (job ? buildNotes(job, event.event_type) : ''),
     colorId: eventTypeToColor(event.event_type),

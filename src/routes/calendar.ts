@@ -76,6 +76,10 @@ router.patch('/events/:id', async (req, res) => {
   }
 
   const merged = { ...existing, ...updates }
+  // Sync installer (first) from installers array
+  if (merged.installers?.length > 0 && !merged.installer) {
+    merged.installer = merged.installers[0]
+  }
 
   if (existing.gcal_event_id) {
     await updateGCalEvent(existing.gcal_event_id, merged, job)
