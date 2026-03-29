@@ -143,11 +143,20 @@ export async function pullFromGCal(): Promise<{ synced: number; unlinked: number
       let linked = false
 
       // Skip availability matching
-      if (eventType !== 'availability') {
-        job = await matchEventToJob(ev)
-        linked = !!job
-        if (!linked) unlinked++
+      if (eventType === 'availability') {
+        // Write all-day availability events to calendar_availability table
+        if (allDay) {
+          const date = startTime.slice(0, 10)
+          const notes = ev.summary || ''
+          await supabase.from('calendar_availability')
+            .upsert({ date, notes, updated_at: new Date().toISOString() }, { onConflict: 'date' })
+        }
+        continue
       }
+
+      job = await matchEventToJob(ev)
+      linked = !!job
+      if (!linked) unlinked++
 
       const title = job ? normalizeTitle(ev.summary || '', job) : (ev.summary || '')
       const installer = extractInstaller(ev.summary || '')
