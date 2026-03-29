@@ -1,115 +1,56 @@
 import { Router } from 'express'
 import { supabase } from '../lib/supabase'
+import {
+  pullFromGCal, pushToGCal, updateGCalEvent, deleteGCalEvent, buildNotes, eventTypeToColor
+} from '../lib/googleCalendar'
 
 const router = Router()
 
-// GET /api/calendar/events?start=&end=
-router.get('/events', async (req, res) => {
-  const { start, end } = req.query
+// GET /api/calendar - fetch all events from Supabase
+router.get('/', async (_, res) => {
+  const threeWeeksAgo = new Date()
+  threeWeeksAgo.setDate(threeWeeksAgo.getDate() - 21)
 
-  let query = supabase
+  const { data, error } = await supabase
     .from('calendar_events')
-    .select('*, jobs(customer_first, customer_last, address, city, state, zip, measure_sheet_url, companycam_url, work_order_rows, raw_lp_data)')
+    .select('*')
+    .gte('start_time', threeWeeksAgo.toISOString())
     .order('start_time', { ascending: true })
 
-  if (start) query = query.gte('start_time', String(start))
-  if (end) query = query.lte('start_time', String(end))
-
-  const { data, error } = await query
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
 })
 
-// POST /api/calendar/events
+// POST /api/calendar/sync - pull from GCal into Supabase
+router.post('/sync', async (_, res) => {
+  try {
+    const result = await pullFromGCal()
+    res.json({ success: true, ...result })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/calendar/events - create event in Supabase + push to GCal
 router.post('/events', async (req, res) => {
-  const {
-    lp_job_id,
-    event_type,
-    crew,
-    title,
-    description,
-    location,
-    start_time,
-    end_time,
-    color_id,
-    notes,
-  } = req.body
+  const event = req.body
 
-  if (!event_type || !start_time || !end_time) {
-    return res.status(400).json({ error: 'event_type, start_time, end_time required' })
+  // Fetch linked job if provided
+  let job: any = null
+  if (event.lp_job_id) {
+    const { data } = await supabase.from('jobs').select('*').eq('lp_job_id', event.lp_job_id).single()
+    job = data
   }
 
-  let autoTitle = title
-  let autoDescription = description
-  let autoLocation = location
-  let companycam_url = null
-  let measure_sheet_url = null
+  // Build notes from job if not provided
+  if (!event.notes && job) event.notes = buildNotes(job, event.event_type)
 
-  if (lp_job_id) {
-    const { data: job } = await supabase
-      .from('jobs')
-      .select('customer_first, customer_last, address, city, state, zip, measure_sheet_url, companycam_url, work_order_rows, raw_lp_data')
-      .eq('lp_job_id', lp_job_id)
-      .single()
-
-    if (job) {
-      if (!autoTitle) {
-        const lastName = job.customer_last || ''
-        const firstName = job.customer_first || ''
-        const customerPart = `${lastName}, ${firstName}`.trim().replace(/^,\s*/, '')
-        const crewPrefix = crew && event_type === 'install' ? `(${crew}) ` : ''
-        autoTitle = `${crewPrefix}${customerPart}`
-      }
-
-      if (!autoLocation) {
-        autoLocation = [job.address, job.city, job.state, job.zip].filter(Boolean).join(', ')
-      }
-
-      companycam_url = job.companycam_url
-      measure_sheet_url = job.measure_sheet_url
-
-      if (!autoDescription) {
-        const d = job.raw_lp_data || {}
-        const phone = d.phone1 || d.phone2 || ''
-        const typeLabel = event_type === 'measure' ? 'Measure'
-          : event_type === 'install' ? 'Install'
-          : event_type === 'service' ? 'Service'
-          : 'Reminder'
-
-        const workOrderLines = Array.isArray(job.work_order_rows)
-          ? job.work_order_rows
-              .map((row: any[]) => Array.isArray(row) ? String(row[0] || '').trim() : String(row || '').trim())
-              .filter(Boolean)
-              .join('\n')
-          : ''
-
-        const parts = [phone, typeLabel, workOrderLines, notes || ''].filter(Boolean)
-        autoDescription = parts.join('\n\n')
-      }
-    }
-  }
-
-  const colorMap: Record<string, string> = {
-    measure: '5', install: '6', service: '7', reminder: '8',
-  }
+  // Push to GCal first to get gcal_event_id
+  const gcalId = await pushToGCal(event, job)
 
   const { data, error } = await supabase
     .from('calendar_events')
-    .insert({
-      lp_job_id: lp_job_id || null,
-      event_type,
-      crew: crew || null,
-      title: autoTitle || '',
-      description: autoDescription || '',
-      location: autoLocation || '',
-      start_time,
-      end_time,
-      color_id: color_id || colorMap[event_type] || '8',
-      companycam_url,
-      measure_sheet_url,
-      notes: notes || null,
-      updated_at: new Date().toISOString(),
-    })
+    .insert({ ...event, gcal_event_id: gcalId, linked: !!job })
     .select()
     .single()
 
@@ -117,10 +58,34 @@ router.post('/events', async (req, res) => {
   res.json(data)
 })
 
-// PATCH /api/calendar/events/:id
+// PATCH /api/calendar/events/:id - update event in Supabase + GCal
 router.patch('/events/:id', async (req, res) => {
   const { id } = req.params
   const updates = req.body
+
+  const { data: existing } = await supabase
+    .from('calendar_events')
+    .select('*')
+    .eq('id', id)
+    .single()
+
+  if (!existing) return res.status(404).json({ error: 'Event not found' })
+
+  let job: any = null
+  const jobId = updates.lp_job_id || existing.lp_job_id
+  if (jobId) {
+    const { data } = await supabase.from('jobs').select('*').eq('lp_job_id', jobId).single()
+    job = data
+  }
+
+  const merged = { ...existing, ...updates }
+
+  if (existing.gcal_event_id) {
+    await updateGCalEvent(existing.gcal_event_id, merged, job)
+  } else {
+    const gcalId = await pushToGCal(merged, job)
+    if (gcalId) updates.gcal_event_id = gcalId
+  }
 
   const { data, error } = await supabase
     .from('calendar_events')
@@ -133,55 +98,34 @@ router.patch('/events/:id', async (req, res) => {
   res.json(data)
 })
 
-// DELETE /api/calendar/events/:id
+// DELETE /api/calendar/events/:id - delete from Supabase, optionally from GCal
 router.delete('/events/:id', async (req, res) => {
   const { id } = req.params
+  const deleteFromGCal = req.query.gcal === 'true'
 
-  const { error } = await supabase
+  const { data: existing } = await supabase
     .from('calendar_events')
-    .delete()
+    .select('gcal_event_id')
     .eq('id', id)
+    .single()
 
-  if (error) return res.status(500).json({ error: error.message })
-  res.json({ ok: true })
-})
-
-// GET /api/calendar/availability?start=&end=
-router.get('/availability', async (req, res) => {
-  const { start, end } = req.query
-  if (!start || !end) return res.status(400).json({ error: 'start and end required' })
-
-  const { data, error } = await supabase
-    .from('crew_availability')
-    .select('id, date, notes')
-    .gte('date', String(start).slice(0, 10))
-    .lte('date', String(end).slice(0, 10))
-    .order('date', { ascending: true })
-
-  if (error) return res.status(500).json({ error: error.message })
-  res.json(data || [])
-})
-
-// POST /api/calendar/availability  (upsert by date)
-router.post('/availability', async (req, res) => {
-  const { date, notes } = req.body
-  if (!date) return res.status(400).json({ error: 'date required' })
-
-  if (!notes || !notes.trim()) {
-    // If notes is empty, delete the record for that date
-    const { error } = await supabase
-      .from('crew_availability')
-      .delete()
-      .eq('date', date)
-    if (error) return res.status(500).json({ error: error.message })
-    return res.json({ deleted: true, date })
+  if (deleteFromGCal && existing?.gcal_event_id) {
+    await deleteGCalEvent(existing.gcal_event_id)
   }
 
+  const { error } = await supabase.from('calendar_events').delete().eq('id', id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
+})
+
+// GET /api/calendar/unlinked - events with no job match
+router.get('/unlinked', async (_, res) => {
   const { data, error } = await supabase
-    .from('crew_availability')
-    .upsert({ date, notes: notes.trim(), updated_at: new Date().toISOString() }, { onConflict: 'date' })
-    .select()
-    .single()
+    .from('calendar_events')
+    .select('*')
+    .eq('linked', false)
+    .neq('event_type', 'availability')
+    .order('start_time', { ascending: false })
 
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
