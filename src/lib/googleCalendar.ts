@@ -56,6 +56,7 @@ export function extractLastName(title: string): string {
   stripped = stripped.replace(JOB_TYPE_WORDS, '').trim()
   // Take first word before comma or space
   return stripped.split(/[,\s]/)[0].trim()
+}
 
 // Build notes string for a job event
 export function buildNotes(job: any, eventType: string): string {
