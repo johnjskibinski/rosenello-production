@@ -54,12 +54,13 @@ export function buildNotes(job: any, eventType: string): string {
   const lines: string[] = []
   if (job.raw_lp_data?.phone1) lines.push(`Phone: ${job.raw_lp_data.phone1}`)
 
-  // Work order lines from raw LP data
-  const wo = job.raw_lp_data?.workorderlines || job.raw_lp_data?.work_order_lines
+  // Work order lines from work_order_rows column (array of arrays)
+  const wo = job.work_order_rows
   if (Array.isArray(wo) && wo.length > 0) {
-    wo.forEach((l: any) => { if (l.description) lines.push(l.description) })
-  } else if (job.raw_lp_data?.workorder) {
-    lines.push(job.raw_lp_data.workorder)
+    wo.forEach((row: any) => {
+      const text = Array.isArray(row) ? row[0] : (row.description || row.item || '')
+      if (text && text.trim()) lines.push(text.trim())
+    })
   }
 
   // CompanyCam
