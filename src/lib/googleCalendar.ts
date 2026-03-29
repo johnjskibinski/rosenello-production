@@ -204,6 +204,13 @@ export async function pushToGCal(event: any, job: any): Promise<string | null> {
       : { dateTime: event.end_time, timeZone: 'America/New_York' },
   }
 
+  // All-day end date must be day after start for GCal
+  if (event.all_day) {
+    const d = new Date(event.start_time.slice(0, 10) + 'T00:00:00')
+    d.setDate(d.getDate() + 1)
+    gcalEvent.end = { date: d.toISOString().slice(0, 10) }
+  }
+
   try {
     const res = await cal.events.insert({ calendarId: CALENDAR_ID, requestBody: gcalEvent })
     return res.data.id || null

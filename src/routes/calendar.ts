@@ -136,17 +136,48 @@ router.get('/availability', async (req, res) => {
 
 // POST /api/calendar/availability — save crew availability note
 router.post('/availability', async (req, res) => {
-  const { date, notes } = req.body
+  const { date, notes, gcal_event_ids } = req.body
   if (!date) return res.status(400).json({ error: 'date required' })
 
   if (!notes || !notes.trim()) {
+    // Delete from GCal if IDs provided
+    if (Array.isArray(gcal_event_ids)) {
+      for (const id of gcal_event_ids) {
+        try { await deleteGCalEvent(id) } catch {}
+      }
+    }
     await supabase.from('calendar_availability').delete().eq('date', date)
     return res.json({ deleted: true })
   }
 
+  // Push each line as a separate all-day GCal event
+  const lines = notes.trim().split('\n').map((l: string) => l.trim()).filter(Boolean)
+  const newGcalIds: string[] = []
+
+  // Delete old GCal events for this date first
+  if (Array.isArray(gcal_event_ids)) {
+    for (const id of gcal_event_ids) {
+      try { await deleteGCalEvent(id) } catch {}
+    }
+  }
+
+  for (const line of lines) {
+    const gcalEvent = {
+      title: line,
+      event_type: 'availability',
+      all_day: true,
+      start_time: date,
+      end_time: date,
+      notes: null,
+      location: '',
+    }
+    const gcalId = await pushToGCal(gcalEvent, null)
+    if (gcalId) newGcalIds.push(gcalId)
+  }
+
   const { data, error } = await supabase
     .from('calendar_availability')
-    .upsert({ date, notes: notes.trim(), updated_at: new Date().toISOString() }, { onConflict: 'date' })
+    .upsert({ date, notes: notes.trim(), gcal_event_ids: newGcalIds, updated_at: new Date().toISOString() }, { onConflict: 'date' })
     .select().single()
 
   if (error) return res.status(500).json({ error: error.message })
