@@ -43,11 +43,19 @@ export function extractInstaller(title: string): string {
   return match ? match[1] : ''
 }
 
-// Extract last name from title like "(Jay W) Smith, John" or "Smith, John" or "Smith"
+// Job type words to strip from titles before matching
+const JOB_TYPE_WORDS = /\b(siding|roofing|windows|window|doors|door|service|gutters|gutter|repair|install|measure|pickup|pick up|check|hoa|approval)\b/gi
+
+// Extract last name from title like "(Jay W) Smith, John" or "Smith, John - 7 DHs" or "Smith siding"
 export function extractLastName(title: string): string {
-  const stripped = title.replace(/^\([^)]+\)\s*/, '').trim()
-  return stripped.split(',')[0].trim()
-}
+  // Strip installer prefix (Jay W)
+  let stripped = title.replace(/^\([^)]+\)\s*/, '').trim()
+  // Strip after dash (e.g. "Smith - 7 DHs")
+  stripped = stripped.split(' - ')[0].trim()
+  // Strip job type words
+  stripped = stripped.replace(JOB_TYPE_WORDS, '').trim()
+  // Take first word before comma or space
+  return stripped.split(/[,\s]/)[0].trim()
 
 // Build notes string for a job event
 export function buildNotes(job: any, eventType: string): string {
@@ -79,7 +87,7 @@ export async function matchEventToJob(gcalEvent: any): Promise<any | null> {
   const location = gcalEvent.location || ''
   const title = gcalEvent.summary || ''
 
-  // 1. Try address match — extract street number + name from location
+  // 1. Try address match — most reliable
   if (location) {
     const streetMatch = location.match(/^(\d+\s+[^,]+)/i)
     if (streetMatch) {
@@ -93,15 +101,46 @@ export async function matchEventToJob(gcalEvent: any): Promise<any | null> {
     }
   }
 
-  // 2. Fallback: last name match
+  // 2. Last name match — strip job type words + installer prefix first
   const lastName = extractLastName(title)
   if (lastName && lastName.length > 2) {
-    const { data } = await supabase
+    // Try exact match first
+    const { data: exact } = await supabase
       .from('jobs')
       .select('*')
       .ilike('customer_last', lastName)
-      .limit(1)
-    if (data && data.length > 0) return data[0]
+      .limit(5)
+    if (exact && exact.length === 1) return exact[0]
+
+    // If multiple hits, try to disambiguate with first name from title
+    if (exact && exact.length > 1) {
+      const stripped = title.replace(/^\([^)]+\)\s*/, '').replace(JOB_TYPE_WORDS, '').trim()
+      const parts = stripped.split(/[,\s]+/)
+      const firstName = parts.length > 1 ? parts[1].trim() : ''
+      if (firstName) {
+        const match = exact.find(j => j.customer_first?.toLowerCase().startsWith(firstName.toLowerCase()))
+        if (match) return match
+      }
+      return exact[0]
+    }
+  }
+
+  // 3. Try matching by street number only if address present but full match failed
+  if (location) {
+    const numMatch = location.match(/^(\d+)/)
+    if (numMatch) {
+      const num = numMatch[1]
+      const lastName2 = extractLastName(title)
+      if (lastName2.length > 2) {
+        const { data } = await supabase
+          .from('jobs')
+          .select('*')
+          .ilike('address', `${num} %`)
+          .ilike('customer_last', `%${lastName2}%`)
+          .limit(1)
+        if (data && data.length > 0) return data[0]
+      }
+    }
   }
 
   return null
