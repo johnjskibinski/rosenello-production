@@ -87,7 +87,6 @@ router.patch('/:lp_job_id/status', async (req, res) => {
   res.json(data?.[0] ?? { lp_job_id, status, updated: false })
 })
 
-export default router
 
 router.patch('/:lp_job_id/measure-sheet', async (req, res) => {
   const { lp_job_id } = req.params
@@ -175,3 +174,5 @@ router.post('/:lp_job_id/upload-docs/:tabName', async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
+
+export default router
