@@ -108,3 +108,46 @@ router.patch('/:lp_job_id/measure-sheet', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
 })
+
+// GET /api/jobs/:lp_job_id/notes
+router.get('/:lp_job_id/notes', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { data, error } = await supabase
+    .from('job_notes')
+    .select('*')
+    .eq('lp_job_id', lp_job_id)
+    .order('created_at', { ascending: false })
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
+
+// POST /api/jobs/:lp_job_id/notes
+router.post('/:lp_job_id/notes', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { note, author } = req.body
+  if (!note?.trim()) return res.status(400).json({ error: 'note required' })
+
+  const { data, error } = await supabase
+    .from('job_notes')
+    .insert({ lp_job_id: parseInt(lp_job_id), note: note.trim(), author: author || 'John' })
+    .select()
+    .single()
+
+  if (error) return res.status(500).json({ error: error.message })
+
+  // Try to sync to LP
+  try {
+    const { lpPost } = await import('../lib/lpClient')
+    await lpPost('Customers/AddNotes', {
+      job_id: lp_job_id,
+      note: note.trim(),
+      author: author || 'John',
+    })
+    await supabase.from('job_notes').update({ lp_synced: true }).eq('id', data.id)
+    data.lp_synced = true
+  } catch {
+    // LP sync failed — note still saved locally
+  }
+
+  res.json(data)
+})
