@@ -151,3 +151,27 @@ router.post('/:lp_job_id/notes', async (req, res) => {
 
   res.json(data)
 })
+
+// POST /api/jobs/:lp_job_id/upload-docs
+// POST /api/jobs/:lp_job_id/upload-docs/:tabName
+router.post('/:lp_job_id/upload-docs', async (req, res) => {
+  const { lp_job_id } = req.params
+  try {
+    const { uploadJobDocs } = await import('../services/lpUpload')
+    const result = await uploadJobDocs(parseInt(lp_job_id))
+    res.json(result)
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+router.post('/:lp_job_id/upload-docs/:tabName', async (req, res) => {
+  const { lp_job_id, tabName } = req.params
+  try {
+    const { uploadJobDocs } = await import('../services/lpUpload')
+    const result = await uploadJobDocs(parseInt(lp_job_id), tabName)
+    res.json(result)
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
