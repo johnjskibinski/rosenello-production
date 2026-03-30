@@ -137,10 +137,10 @@ router.post('/:lp_job_id/notes', async (req, res) => {
   // Try to sync to LP
   try {
     const { lpPost } = await import('../lib/lpClient')
-    await lpPost('Customers/AddNotes', {
-      job_id: lp_job_id,
-      note: note.trim(),
-      author: author || 'John',
+    await lpPost('SalesApi/AddNotes', {
+      rectype: 'job',
+      recid: lp_job_id,
+      notes: note.trim(),
     })
     await supabase.from('job_notes').update({ lp_synced: true }).eq('id', data.id)
     data.lp_synced = true
