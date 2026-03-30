@@ -88,3 +88,23 @@ router.patch('/:lp_job_id/status', async (req, res) => {
 })
 
 export default router
+
+router.patch('/:lp_job_id/measure-sheet', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { measure_sheet_url } = req.body
+  if (!measure_sheet_url) return res.status(400).json({ error: 'measure_sheet_url required' })
+
+  // Validate it's a Google Sheets/Drive URL
+  const isValid = measure_sheet_url.includes('docs.google.com') || measure_sheet_url.includes('drive.google.com')
+  if (!isValid) return res.status(400).json({ error: 'Must be a Google Sheets or Drive URL' })
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .update({ measure_sheet_url })
+    .eq('lp_job_id', lp_job_id)
+    .select()
+    .single()
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
