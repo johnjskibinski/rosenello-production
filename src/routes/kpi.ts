@@ -107,3 +107,69 @@ router.get('/measure-velocity', async (_req, res) => {
 })
 
 export default router
+
+router.get('/unit-totals', async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('contract_date, total_windows, total_doors, bay_windows, bow_windows, total_openings, total_units')
+      .not('contract_date', 'is', null)
+
+    if (error) return res.status(500).json({ error: error.message })
+
+    const now = new Date()
+
+    function startOf(unit: 'week' | 'month' | 'quarter' | 'year'): Date {
+      const d = new Date(now)
+      if (unit === 'week') {
+        const day = d.getDay()
+        d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+        d.setHours(0, 0, 0, 0)
+      } else if (unit === 'month') {
+        d.setDate(1); d.setHours(0, 0, 0, 0)
+      } else if (unit === 'quarter') {
+        const q = Math.floor(d.getMonth() / 3)
+        d.setMonth(q * 3, 1); d.setHours(0, 0, 0, 0)
+      } else {
+        d.setMonth(0, 1); d.setHours(0, 0, 0, 0)
+      }
+      return d
+    }
+
+    function sumMetrics(rows: any[]) {
+      return {
+        total_windows:  rows.reduce((s, r) => s + (r.total_windows  || 0), 0),
+        total_doors:    rows.reduce((s, r) => s + (r.total_doors    || 0), 0),
+        bay_windows:    rows.reduce((s, r) => s + (r.bay_windows    || 0), 0),
+        bow_windows:    rows.reduce((s, r) => s + (r.bow_windows    || 0), 0),
+        total_openings: rows.reduce((s, r) => s + (r.total_openings || 0), 0),
+        total_units:    rows.reduce((s, r) => s + (r.total_units    || 0), 0),
+        job_count: rows.length,
+      }
+    }
+
+    const periods: Record<string, any> = {}
+    for (const p of ['week', 'month', 'quarter', 'year'] as const) {
+      const start = startOf(p)
+      const rows = data.filter(r => new Date(r.contract_date) >= start)
+      periods[p] = sumMetrics(rows)
+    }
+
+    // 12-month trend
+    const monthly: Record<string, any> = {}
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const key = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+      const next = new Date(d.getFullYear(), d.getMonth() + 1, 1)
+      const rows = data.filter(r => {
+        const cd = new Date(r.contract_date)
+        return cd >= d && cd < next
+      })
+      monthly[key] = sumMetrics(rows)
+    }
+
+    res.json({ periods, monthly })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
