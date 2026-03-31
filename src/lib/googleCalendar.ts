@@ -13,18 +13,26 @@ function getCalendarClient() {
 }
 
 // Color ID → event type
-export function colorToEventType(colorId: string | null | undefined): 'measure' | 'install' | 'availability' {
-  if (colorId === '5') return 'measure'       // Banana/Yellow
-  if (colorId === '6') return 'install'       // Tangerine
-  if (colorId === '11') return 'availability' // Tomato
-  return 'install'                            // Default/no color = install
+export function colorToEventType(colorId: string | null | undefined): string {
+  if (colorId === '5')  return 'measure'       // Banana/Yellow
+  if (colorId === '6')  return 'install'       // Tangerine/Orange
+  if (colorId === '7')  return 'service'       // Peacock/Blue
+  if (colorId === '8')  return 'reminder'      // Graphite/Grey
+  if (colorId === '11') return 'availability'  // Tomato/Red
+  if (colorId === '10') return 'completed'     // Basil/Green
+  if (colorId === '2')  return 'completed'     // Sage/Green
+  return 'other'
 }
 
 // Event type → color ID
 export function eventTypeToColor(type: string): string {
-  if (type === 'measure') return '5'
+  if (type === 'measure')      return '5'
+  if (type === 'install')      return '6'
+  if (type === 'service')      return '7'
+  if (type === 'reminder')     return '8'
   if (type === 'availability') return '11'
-  return '6' // install = tangerine (works on both test + prod)
+  if (type === 'completed')    return '10'
+  return '6'
 }
 
 // Normalize title from GCal to standard format given a matched job
