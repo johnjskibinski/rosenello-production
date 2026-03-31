@@ -31,7 +31,7 @@ router.post('/sync', async (_, res) => {
     const result = await pullFromGCal()
     res.json({ success: true, ...result })
   } catch (err: any) {
-    res.status(500).json({ error: err.message })
+    console.error("SYNC ERROR FULL:", JSON.stringify(err, null, 2)); res.status(500).json({ error: err.message, stack: err.stack, code: err.code })
   }
 })
 
