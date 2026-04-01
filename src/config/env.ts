@@ -14,6 +14,5 @@ export const env = {
     username: process.env.LP_USERNAME!,
     password: process.env.LP_PASSWORD!,
     appKey: process.env.LP_APP_KEY!,
-    baseUrl: `https://${process.env.LP_SERVER}.leadperfection.com`,
   },
 };
