@@ -135,6 +135,7 @@ export async function matchEventToJob(gcalEvent: any): Promise<any | null> {
         const match = exact.find(j => j.customer_first?.toLowerCase().startsWith(firstName.toLowerCase()))
         if (match) return match
       }
+      console.warn(`[Calendar] Ambiguous match for "${lastName}" — ${exact.length} jobs found, using first match (job ${exact[0].lp_job_id})`)
       return exact[0]
     }
   }
