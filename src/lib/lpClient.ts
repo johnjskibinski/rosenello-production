@@ -46,7 +46,7 @@ export async function getLPToken(): Promise<string> {
 export async function lpPost(endpoint: string, body: Record<string, any> = {}): Promise<any> {
   const token = await getLPToken();
   const url = `${LP_BASE}/api/${endpoint}`;
-  console.log('[LP] POST', url, body);
+  console.log('[LP] POST', url);
 
   const formData = new URLSearchParams();
   for (const [key, val] of Object.entries(body)) {

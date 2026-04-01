@@ -62,7 +62,7 @@ export async function uploadJobDocs(lpJobId: number, tabName?: string) {
     try {
       console.log(`[Upload] Exporting "${doc.tabName}" for job ${lpJobId}...`)
       const pdfBuffer = await exportTabAsPdf(spreadsheetId, doc.tabName, doc.landscape)
-      const uints = Array.from(pdfBuffer).map(b => (b < 0 ? b + 256 : b))
+      const uints = Array.from(pdfBuffer)
       const filename = `${customerName} - ${doc.tabName}.pdf`
 
       await lpPostJson('SalesApi/AddJobImages', {

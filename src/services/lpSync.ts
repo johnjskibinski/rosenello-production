@@ -71,7 +71,7 @@ export async function syncActiveJobs() {
         } else {
           totalSynced += jobArray.length
 
-          // Create measure sheets for SN and PU jobs only
+          // Create measure sheets for SN, PU, and SS jobs
           if (MEASURE_SHEET_STATUSES.includes(status)) {
             for (const job of mapped) {
               // Skip if sheet already exists in DB
