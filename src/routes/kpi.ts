@@ -106,8 +106,6 @@ router.get('/measure-velocity', async (_req, res) => {
   }
 })
 
-export default router
-
 router.get('/unit-totals', async (_req, res) => {
   try {
     const { data, error } = await supabase
@@ -173,3 +171,5 @@ router.get('/unit-totals', async (_req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
+
+export default router
