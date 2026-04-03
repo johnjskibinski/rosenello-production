@@ -41,11 +41,9 @@ router.post('/sync', async (_, res) => {
   }
 })
 
-// Search endpoint — searches all active jobs across all statuses
 router.get('/search', async (req, res) => {
   const q = String(req.query.q || '').trim()
   if (!q) return res.json([])
-
   try {
     const term = `%${q}%`
     const { data, error } = await supabase
@@ -55,9 +53,19 @@ router.get('/search', async (req, res) => {
       .not('lp_status', 'in', '("C","P","E","X","G","J","L")')
       .order('customer_last', { ascending: true })
       .limit(25)
-
     if (error) throw error
     res.json(data || [])
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/jobs/push-suggestions-sheet — rebuild installer suggestions Google Sheet
+router.post('/push-suggestions-sheet', async (_, res) => {
+  try {
+    const { pushSuggestionsToSheet } = await import('../lib/googleSheetsSuggestions')
+    const result = await pushSuggestionsToSheet()
+    res.json({ success: true, ...result })
   } catch (err: any) {
     res.status(500).json({ error: err.message })
   }
@@ -76,39 +84,31 @@ router.patch('/:lp_job_id/status', async (req, res) => {
   const { lp_job_id } = req.params
   const { status } = req.body
   if (!status) return res.status(400).json({ error: 'status required' })
-
   const { data, error } = await supabase
     .from('jobs')
     .update({ lp_status: status, last_synced_at: new Date().toISOString() })
     .eq('lp_job_id', lp_job_id)
     .select()
-
   if (error) return res.status(500).json({ error: error.message })
   res.json(data?.[0] ?? { lp_job_id, status, updated: false })
 })
-
 
 router.patch('/:lp_job_id/measure-sheet', async (req, res) => {
   const { lp_job_id } = req.params
   const { measure_sheet_url } = req.body
   if (!measure_sheet_url) return res.status(400).json({ error: 'measure_sheet_url required' })
-
-  // Validate it's a Google Sheets/Drive URL
   const isValid = measure_sheet_url.includes('docs.google.com') || measure_sheet_url.includes('drive.google.com')
   if (!isValid) return res.status(400).json({ error: 'Must be a Google Sheets or Drive URL' })
-
   const { data, error } = await supabase
     .from('jobs')
     .update({ measure_sheet_url })
     .eq('lp_job_id', lp_job_id)
     .select()
     .single()
-
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
 })
 
-// GET /api/jobs/:lp_job_id/notes
 router.get('/:lp_job_id/notes', async (req, res) => {
   const { lp_job_id } = req.params
   const { data, error } = await supabase
@@ -120,39 +120,63 @@ router.get('/:lp_job_id/notes', async (req, res) => {
   res.json(data)
 })
 
-// POST /api/jobs/:lp_job_id/notes
 router.post('/:lp_job_id/notes', async (req, res) => {
   const { lp_job_id } = req.params
   const { note, author } = req.body
   if (!note?.trim()) return res.status(400).json({ error: 'note required' })
-
   const { data, error } = await supabase
     .from('job_notes')
     .insert({ lp_job_id: parseInt(lp_job_id), note: note.trim(), author: author || 'John' })
     .select()
     .single()
-
   if (error) return res.status(500).json({ error: error.message })
-
-  // Try to sync to LP
   try {
     const { lpPost } = await import('../lib/lpClient')
-    await lpPost('SalesApi/AddNotes', {
-      rectype: 'job',
-      recid: lp_job_id,
-      notes: note.trim(),
-    })
+    await lpPost('SalesApi/AddNotes', { rectype: 'job', recid: lp_job_id, notes: note.trim() })
     await supabase.from('job_notes').update({ lp_synced: true }).eq('id', data.id)
     data.lp_synced = true
-  } catch {
-    // LP sync failed — note still saved locally
-  }
-
+  } catch { }
   res.json(data)
 })
 
-// POST /api/jobs/:lp_job_id/upload-docs
-// POST /api/jobs/:lp_job_id/upload-docs/:tabName
+// GET /api/jobs/:lp_job_id/installer-suggestion
+router.get('/:lp_job_id/installer-suggestion', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { data, error } = await supabase
+    .from('job_installer_suggestions')
+    .select('*')
+    .eq('lp_job_id', lp_job_id)
+    .maybeSingle()
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data || null)
+})
+
+// PUT /api/jobs/:lp_job_id/installer-suggestion — upsert
+router.put('/:lp_job_id/installer-suggestion', async (req, res) => {
+  const { lp_job_id } = req.params
+  const { first_choice, second_choice, notes } = req.body
+  const { data, error } = await supabase
+    .from('job_installer_suggestions')
+    .upsert(
+      {
+        lp_job_id: parseInt(lp_job_id),
+        first_choice: first_choice || null,
+        second_choice: second_choice || null,
+        notes: notes || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'lp_job_id' }
+    )
+    .select()
+    .single()
+  if (error) return res.status(500).json({ error: error.message })
+  // Push to sheet in background — fire and forget
+  import('../lib/googleSheetsSuggestions')
+    .then(({ pushSuggestionsToSheet }) => pushSuggestionsToSheet())
+    .catch(err => console.error('Sheet push failed:', err.message))
+  res.json(data)
+})
+
 router.post('/:lp_job_id/upload-docs', async (req, res) => {
   const { lp_job_id } = req.params
   try {
