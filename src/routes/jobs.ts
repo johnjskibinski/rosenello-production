@@ -86,6 +86,15 @@ router.post('/import-backlog-sheet', async (_, res) => {
   }
 })
 
+// GET /api/jobs/installer-suggestions — all suggestions for calendar use
+router.get('/installer-suggestions', async (_, res) => {
+  const { data, error } = await supabase
+    .from('job_installer_suggestions')
+    .select('lp_job_id, first_choice, second_choice')
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data || [])
+})
+
 router.get('/', async (_, res) => {
   const { data, error } = await supabase
     .from('jobs')
