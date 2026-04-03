@@ -16,13 +16,31 @@ const INSTALLER_MAP: Record<string, string> = {
 
 function mapInstaller(raw: string): string {
   if (!raw?.trim()) return ''
-  const trimmed = raw.trim()
-  return INSTALLER_MAP[trimmed] || trimmed
+  return INSTALLER_MAP[raw.trim()] || raw.trim()
 }
 
 function parseGross(raw: string): number {
   if (!raw) return 0
   return parseFloat(raw.replace(/[$,]/g, '')) || 0
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    const cols: string[] = []
+    let cur = ''
+    let inQuote = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === '"') { inQuote = !inQuote }
+      else if (ch === ',' && !inQuote) { cols.push(cur); cur = '' }
+      else { cur += ch }
+    }
+    cols.push(cur)
+    rows.push(cols)
+  }
+  return rows
 }
 
 function getAuth() {
@@ -44,22 +62,24 @@ export interface ImportResult {
 }
 
 export async function importFromBacklogSheet(): Promise<ImportResult> {
+  // Get OAuth access token
   const auth = getAuth()
-  const sheets = google.sheets({ version: 'v4', auth })
+  const tokenRes = await auth.getAccessToken()
+  const token = tokenRes.token
+  if (!token) throw new Error('Failed to get OAuth token')
 
-  // Find the tab name by gid
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: BACKLOG_SHEET_ID })
-  const tab = meta.data.sheets?.find(s => s.properties?.sheetId === BACKLOG_GID)
-  if (!tab?.properties?.title) throw new Error(`Tab with gid ${BACKLOG_GID} not found`)
-  const tabName = tab.properties.title
-
-  // Read sheet data (skip header row)
-  const resp = await sheets.spreadsheets.values.get({
-    spreadsheetId: BACKLOG_SHEET_ID,
-    range: `${tabName}!A2:G200`,
+  // Export the specific tab as CSV — works on both xlsx and native Sheets
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${BACKLOG_SHEET_ID}/export?format=csv&gid=${BACKLOG_GID}`
+  const res = await fetch(exportUrl, {
+    headers: { Authorization: `Bearer ${token}` }
   })
+  if (!res.ok) throw new Error(`Sheet export failed: ${res.status} ${res.statusText}`)
 
-  const rows = (resp.data.values || []).filter(r => r[0]?.trim())
+  const csvText = await res.text()
+  const allRows = parseCsv(csvText)
+
+  // Skip header row, filter empty
+  const rows = allRows.slice(1).filter(r => r[0]?.trim())
 
   // Pull all active jobs from Supabase
   const { data: jobs, error } = await supabase
@@ -95,7 +115,6 @@ export async function importFromBacklogSheet(): Promise<ImportResult> {
     if (candidates.length === 1) {
       match = candidates[0]
     } else if (candidates.length > 1 && gross > 0) {
-      // Tiebreak by gross amount — within $100
       match = candidates.find(j => Math.abs(parseFloat(j.gross_amount || 0) - gross) < 100)
     }
 
