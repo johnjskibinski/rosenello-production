@@ -71,6 +71,21 @@ router.post('/push-suggestions-sheet', async (_, res) => {
   }
 })
 
+// POST /api/jobs/import-backlog-sheet — import suggestions from legacy Google Sheet
+router.post('/import-backlog-sheet', async (_, res) => {
+  try {
+    const { importFromBacklogSheet } = await import('../lib/importBacklogSheet')
+    const result = await importFromBacklogSheet()
+    // After import, push the suggestions sheet
+    import('../lib/googleSheetsSuggestions')
+      .then(({ pushSuggestionsToSheet }) => pushSuggestionsToSheet())
+      .catch(err => console.error('Sheet push after import failed:', err.message))
+    res.json({ success: true, ...result })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 router.get('/', async (_, res) => {
   const { data, error } = await supabase
     .from('jobs')
