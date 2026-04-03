@@ -1,6 +1,25 @@
 import { google } from 'googleapis'
 import { supabase } from './supabase'
 
+const STATUS_LABELS: Record<string, string> = {
+  SN: 'Scope Needed',
+  PU: 'Scope / Pickup Check',
+  SS: 'Scope Scheduled',
+  MR: 'Scope Complete / In Review',
+  D:  'Waiting HOA Approval',
+  '2': 'Materials Ordered',
+  NS: 'Need to Schedule',
+  S:  'Scheduled',
+  '5': 'In Progress',
+  T:  'Installed & Unpaid',
+  SI: 'Need Subcontractor Invoice',
+  B:  'Backlog',
+  '1': 'Deposit Received',
+  '3': 'Partially Installed',
+  CM: 'Complete',
+  U:  'Unworkable',
+}
+
 const SUGGESTIONS_SHEET_NAME = 'Rosenello Installer Suggestions'
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '1ZWQoi0_ZV2-K2UeuGXQUnYNouUTes3V2'
 
@@ -47,7 +66,7 @@ export async function pushSuggestionsToSheet(): Promise<{ url: string; rows: num
       job.customer_first || '',
       job.city || '',
       job.state || '',
-      job.lp_status || '',
+      STATUS_LABELS[job.lp_status] || job.lp_status || '',
       job.total_units ?? 0,
       job.gross_amount ? Number(job.gross_amount).toFixed(2) : '0.00',
       job.product || '',
