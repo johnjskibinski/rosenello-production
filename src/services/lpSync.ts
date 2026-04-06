@@ -1,10 +1,12 @@
 import { lpPost } from '../lib/lpClient'
 import { supabase } from '../lib/supabase'
 import { createMeasureSheet } from '../lib/googleSheets'
-import { resolveCompanyCamProject } from './companyCam'
 
 const ACTIVE_STATUSES = ['SN','PU','SS','MR','D','B','1','2','3','NS','SV','S','5','T','SI','CM','U']
+const CLOSED_STATUSES = ['C','P','E','X','G','J','L']
+const ALL_STATUSES = [...ACTIVE_STATUSES, ...CLOSED_STATUSES]
 const MEASURE_SHEET_STATUSES = ['SN', 'PU', 'SS']
+const CLOSED_START_DATE = new Date(Date.now() - 220 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
 function mapJob(raw: any) {
   return {
@@ -35,7 +37,9 @@ export async function syncActiveJobs() {
   let totalErrors = 0
   let sheetsCreated = 0
 
-  for (const status of ACTIVE_STATUSES) {
+  for (const status of ALL_STATUSES) {
+    const isClosed = CLOSED_STATUSES.includes(status)
+    const startdate = isClosed ? CLOSED_START_DATE : '2020-01-01'
     let page = 1
     let hasMore = true
 
@@ -43,7 +47,7 @@ export async function syncActiveJobs() {
       try {
         const result = await lpPost('Customers/GetJobStatusChanges', {
           jbs_id: status,
-          startdate: '2020-01-01',
+          startdate,
           enddate: '2099-12-31',
           PageSize: '250',
           StartIndex: String((page - 1) * 250 + 1),
@@ -55,7 +59,6 @@ export async function syncActiveJobs() {
         const jobArray = Array.isArray(jobs) ? jobs : [jobs]
         if (jobArray.length === 0) { hasMore = false; break }
 
-        // Filter out any records without a valid job ID
         const mapped = jobArray.map(mapJob).filter(j => !isNaN(j.lp_job_id) && j.lp_job_id > 0)
         if (mapped.length === 0) { hasMore = false; break }
 
@@ -71,10 +74,8 @@ export async function syncActiveJobs() {
         } else {
           totalSynced += jobArray.length
 
-          // Create measure sheets for SN, PU, and SS jobs
           if (MEASURE_SHEET_STATUSES.includes(status)) {
             for (const job of mapped) {
-              // Skip if sheet already exists in DB
               const { data: existing } = await supabase
                 .from('jobs')
                 .select('measure_sheet_url')
@@ -108,22 +109,6 @@ export async function syncActiveJobs() {
       }
     }
   }
-
-  // Async CC resolution — non-blocking, runs after main sync
-  supabase
-    .from('jobs')
-    .select('lp_job_id, customer_first, customer_last, address, city, state, zip, contract_date')
-    .is('companycam_project_id', null)
-    .is('companycam_checked_at', null)
-    .then(({ data: jobsNeedingCC }) => {
-      if (!jobsNeedingCC || !jobsNeedingCC.length) return
-      console.log('[CC] Resolving ' + jobsNeedingCC.length + ' jobs')
-      Promise.allSettled(jobsNeedingCC.map(job => resolveCompanyCamProject(job)))
-        .then(results => {
-          const resolved = results.filter(r => r.status === 'fulfilled' && r.value).length
-          console.log('[CC] Resolved ' + resolved + '/' + jobsNeedingCC.length + ' projects')
-        })
-    })
 
   return { totalSynced, totalErrors, sheetsCreated }
 }
