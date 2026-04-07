@@ -115,17 +115,32 @@ router.post('/import-csv', async (req, res) => {
         }
       }
 
-      if (category === 'Mismeasure' && costRow) {
-        const { error: mmErr } = await supabase.from('mismeasures').upsert({
-          lp_job_id,
-          job_cost_id: costRow.id,
-          cost,
-          status: 'pending',
-          invoice_date: invoiceDate || null,
-          lp_comments: comments || null
-        }, { onConflict: 'job_cost_id' })
+      if (category === 'Mismeasure') {
+        // Fetch the cost row id if upsert didn't return it
+        let costId = costRow?.id
+        if (!costId) {
+          const { data: existing } = await supabase
+            .from('job_costs')
+            .select('id')
+            .eq('lp_job_id', lp_job_id)
+            .eq('cost_type', 'actual')
+            .eq('mat_type', matType)
+            .eq('invoice_date', invoiceDate || null)
+            .single()
+          costId = existing?.id
+        }
+        if (costId) {
+          const { error: mmErr } = await supabase.from('mismeasures').upsert({
+            lp_job_id,
+            job_cost_id: costId,
+            cost,
+            status: 'pending',
+            invoice_date: invoiceDate || null,
+            lp_comments: comments || null
+          }, { onConflict: 'job_cost_id' })
 
-        if (!mmErr) mismeasuresCreated++
+          if (!mmErr) mismeasuresCreated++
+        }
       }
     }
 
