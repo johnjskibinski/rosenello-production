@@ -85,3 +85,15 @@ export async function readWorkOrderRows(spreadsheetId: string): Promise<any[][]>
 
   return result.data.values || []
 }
+
+export async function readCellValue(spreadsheetId: string, range: string): Promise<string | null> {
+  const auth = getAuth()
+  const sheets = google.sheets({ version: 'v4', auth })
+
+  const result = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+  })
+
+  return result.data.values?.[0]?.[0] ?? null
+}

@@ -1,7 +1,7 @@
 // Ported and adapted from legacy Apps Script app (Uploads.gs)
 import { getLPToken } from '../lib/lpClient'
 import { supabase } from '../lib/supabase'
-import { exportTabAsPdf, readProjectTotals, readWorkOrderRows } from '../lib/googleSheetsPdf'
+import { exportTabAsPdf, readProjectTotals, readWorkOrderRows, readCellValue } from '../lib/googleSheetsPdf'
 
 const LP_BASE_URL = 'https://api.leadperfection.com'
 
@@ -81,7 +81,7 @@ export async function uploadJobDocs(lpJobId: number, tabName?: string) {
     }
   }
 
-  // Only read totals + work order rows on full upload or first time
+  // Only read totals + work order rows + estimated costs on full upload
   let totals = {
     total_windows: 0, total_doors: 0, bay_windows: 0,
     bow_windows: 0, total_openings: 0, total_units: 0,
@@ -94,6 +94,28 @@ export async function uploadJobDocs(lpJobId: number, tabName?: string) {
     }
     try { workOrderRows = await readWorkOrderRows(spreadsheetId) } catch (e: any) {
       console.error(`[Upload] Failed to read work order rows:`, e.message)
+    }
+
+    // Read estimated costs from Costing tab and push to job_costs
+    try {
+      const estimatedMaterials = await readCellValue(spreadsheetId, 'Costing!D21')
+      const estimatedLabor = await readCellValue(spreadsheetId, 'Costing!D23')
+
+      if (estimatedMaterials || estimatedLabor) {
+        const body: any = {}
+        if (estimatedMaterials) body.estimated_materials = parseFloat(String(estimatedMaterials).replace(/[^0-9.-]/g, ''))
+        if (estimatedLabor) body.estimated_labor = parseFloat(String(estimatedLabor).replace(/[^0-9.-]/g, ''))
+
+        const railwayBase = process.env.RAILWAY_BASE_URL || 'https://rosenello-production-production.up.railway.app'
+        await fetch(`${railwayBase}/api/costs/${lpJobId}/estimated`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        console.log(`[Upload] ✓ Estimated costs pushed for job ${lpJobId}: materials=${body.estimated_materials} labor=${body.estimated_labor}`)
+      }
+    } catch (e: any) {
+      console.error(`[Upload] Failed to push estimated costs:`, e.message)
     }
   }
 
