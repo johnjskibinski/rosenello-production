@@ -6,6 +6,7 @@ import { env } from './config/env';
 import kpiRouter from './routes/kpi';
 import jobRoutes from './routes/jobs'
 import calendarRouter from './routes/calendar'
+import costsRouter from './routes/costs'
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok' }));
 app.use('/api/kpi', kpiRouter);
 app.use('/api/jobs', jobRoutes)
 app.use('/api/calendar', calendarRouter)
+app.use('/api/costs', costsRouter)
 
 // Sync Mon-Fri every 4 hours between 7am-7pm (Eastern)
 cron.schedule('0 7,11,15,19 * * 1-5', async () => {
