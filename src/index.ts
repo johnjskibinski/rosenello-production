@@ -7,6 +7,7 @@ import kpiRouter from './routes/kpi';
 import jobRoutes from './routes/jobs'
 import calendarRouter from './routes/calendar'
 import costsRouter from './routes/costs'
+import reportsRouter from './routes/reports'
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use('/api/kpi', kpiRouter);
 app.use('/api/jobs', jobRoutes)
 app.use('/api/calendar', calendarRouter)
 app.use('/api/costs', costsRouter)
+app.use('/api/reports', reportsRouter)
 
 // Sync Mon-Fri every 4 hours between 7am-7pm (Eastern)
 cron.schedule('0 7,11,15,19 * * 1-5', async () => {
