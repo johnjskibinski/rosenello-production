@@ -203,3 +203,5 @@ router.get('/:lp_job_id', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
 })
+
+export default router
