@@ -172,3 +172,34 @@ router.post('/:lp_job_id/estimated', async (req, res) => {
   }
 })
 
+
+// GET /api/costs/:lp_job_id
+router.get('/:lp_job_id', async (req, res) => {
+  const lp_job_id = parseInt(req.params.lp_job_id)
+  if (!lp_job_id) return res.status(400).json({ error: 'lp_job_id required' })
+
+  const { data, error } = await supabase
+    .from('job_costs')
+    .select('*')
+    .eq('lp_job_id', lp_job_id)
+    .order('cost_type', { ascending: true })
+    .order('category', { ascending: true })
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
+
+router.get('/:lp_job_id', async (req, res) => {
+  const lp_job_id = parseInt(req.params.lp_job_id)
+  if (!lp_job_id) return res.status(400).json({ error: 'lp_job_id required' })
+
+  const { data, error } = await supabase
+    .from('job_costs')
+    .select('*')
+    .eq('lp_job_id', lp_job_id)
+    .order('cost_type', { ascending: true })
+    .order('category', { ascending: true })
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
