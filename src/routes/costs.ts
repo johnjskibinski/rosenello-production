@@ -48,11 +48,28 @@ router.post('/import-csv', async (req, res) => {
       if (!contractid || !matType) continue
       const cost = parseFloat(costStr) || 0
 
-      const { data: jobRow } = await supabase
+      // Try exact contract_id match first, then fallback to numeric prefix
+      let jobRow: any = null
+      const exactMatch = await supabase
         .from('jobs')
         .select('lp_job_id')
         .eq('contract_id', contractid)
         .single()
+      jobRow = exactMatch.data
+
+      if (!jobRow) {
+        // Fallback: match on numeric job number prefix (e.g. "11414-WED" -> "11414")
+        const numericPrefix = contractid.split('-')[0]
+        if (numericPrefix) {
+          const { data: prefixMatch } = await supabase
+            .from('jobs')
+            .select('lp_job_id')
+            .like('contract_id', `${numericPrefix}-%`)
+            .limit(1)
+            .single()
+          jobRow = prefixMatch
+        }
+      }
 
       if (!jobRow) continue
       const lp_job_id = jobRow.lp_job_id
