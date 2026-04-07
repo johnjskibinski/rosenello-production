@@ -175,6 +175,4 @@ router.post('/:lp_job_id/upload-docs/:tabName', async (req, res) => {
   }
 })
 
-export default router
-
 export default router;
