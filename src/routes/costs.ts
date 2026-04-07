@@ -22,6 +22,22 @@ router.post('/import-csv', async (req, res) => {
     const catMap: Record<string, any> = {}
     for (const c of (cats || [])) catMap[c.mat_type] = c
 
+    // Load all jobs into memory for fast lookup - avoid per-row DB queries
+    const { data: allJobs } = await supabase
+      .from('jobs')
+      .select('lp_job_id, contract_id')
+    const jobByContractId: Record<string, number> = {}
+    const jobByNumericPrefix: Record<string, number> = {}
+    for (const j of (allJobs || [])) {
+      if (j.contract_id) {
+        jobByContractId[j.contract_id] = j.lp_job_id
+        const prefix = j.contract_id.split('-')[0]
+        if (prefix && !jobByNumericPrefix[prefix]) {
+          jobByNumericPrefix[prefix] = j.lp_job_id
+        }
+      }
+    }
+
     let rowsImported = 0
     let mismeasuresCreated = 0
     const unknownMatTypes: string[] = []
@@ -48,31 +64,13 @@ router.post('/import-csv', async (req, res) => {
       if (!contractid || !matType) continue
       const cost = parseFloat(costStr) || 0
 
-      // Try exact contract_id match first, then fallback to numeric prefix
-      let jobRow: any = null
-      const exactMatch = await supabase
-        .from('jobs')
-        .select('lp_job_id')
-        .eq('contract_id', contractid)
-        .single()
-      jobRow = exactMatch.data
-
-      if (!jobRow) {
-        // Fallback: match on numeric job number prefix (e.g. "11414-WED" -> "11414")
+      // In-memory lookup - exact match first, then numeric prefix fallback
+      let lp_job_id = jobByContractId[contractid]
+      if (!lp_job_id) {
         const numericPrefix = contractid.split('-')[0]
-        if (numericPrefix) {
-          const { data: prefixMatch } = await supabase
-            .from('jobs')
-            .select('lp_job_id')
-            .like('contract_id', `${numericPrefix}-%`)
-            .limit(1)
-            .single()
-          jobRow = prefixMatch
-        }
+        if (numericPrefix) lp_job_id = jobByNumericPrefix[numericPrefix]
       }
-
-      if (!jobRow) continue
-      const lp_job_id = jobRow.lp_job_id
+      if (!lp_job_id) continue
 
       const cat = catMap[matType]
       const category = cat?.category || null
