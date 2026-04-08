@@ -48,6 +48,7 @@ export async function syncActiveJobs() {
           enddate: '2099-12-31',
           PageSize: '250',
           StartIndex: String((page - 1) * 250 + 1),
+          sortorder: CLOSED_STATUSES.includes(status) ? '2' : '1',
         })
 
         const jobs = result
