@@ -247,7 +247,7 @@ router.post('/backfill-completed-dates', async (req, res) => {
     for (let i = 1; i < lines.length; i++) {
       const row = lines[i].split(',').map((v: string) => v.replace(/"/g, '').trim())
       const jobId = parseInt(col(row, 'job_id'))
-      const completeDateRaw = col(row, 'CompleteDate')
+      const completeDateRaw = col(row, 'CompletionDate')
 
       if (!jobId || !completeDateRaw) { skipped++; continue }
 
