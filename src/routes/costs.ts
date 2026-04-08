@@ -22,7 +22,7 @@ router.post('/import-csv', async (req, res) => {
     const catMap: Record<string, any> = {}
     for (const c of (cats || [])) catMap[c.mat_type] = c
 
-    // Load all jobs into memory for fast lookup - avoid per-row DB queries
+    // Load all jobs into memory for fast lookup
     const { data: allJobs } = await supabase
       .from('jobs')
       .select('lp_job_id, contract_id')
@@ -38,9 +38,13 @@ router.post('/import-csv', async (req, res) => {
       }
     }
 
-    let rowsImported = 0
-    let mismeasuresCreated = 0
+    // --- PASS 1: parse all rows and resolve lp_job_ids ---
+    // This lets us delete-then-reinsert cleanly, avoiding the
+    // NULL invoice_date upsert collision bug in Postgres.
+    const parsedRows: any[] = []
     const unknownMatTypes: string[] = []
+    const seenJobIds = new Set<number>()
+    const completionDates: Record<number, string> = {}
 
     for (let i = 1; i < lines.length; i++) {
       const row: string[] = []
@@ -64,7 +68,6 @@ router.post('/import-csv', async (req, res) => {
       if (!contractid || !matType) continue
       const cost = parseFloat(costStr) || 0
 
-      // In-memory lookup - exact match first, then numeric prefix fallback
       let lp_job_id = jobByContractId[contractid]
       if (!lp_job_id) {
         const numericPrefix = contractid.split('-')[0]
@@ -76,76 +79,91 @@ router.post('/import-csv', async (req, res) => {
       const category = cat?.category || null
       if (!cat && !unknownMatTypes.includes(matType)) unknownMatTypes.push(matType)
 
-      const laborComment = matType === 'Labor' && comments ? comments : null
+      seenJobIds.add(lp_job_id)
 
+      if (completionDate) completionDates[lp_job_id] = completionDate
+
+      parsedRows.push({
+        lp_job_id,
+        cost_type: 'actual',
+        mat_type: matType,
+        category,
+        is_sub: cat?.is_sub ?? null,
+        qty: parseFloat(qty) || null,
+        total_cost: cost,
+        labor_comment: matType === 'Labor' && comments ? comments : null,
+        invoice_date: invoiceDate || null,
+        comments: comments || null,
+        source: 'lp_csv'
+      })
+    }
+
+    // --- PASS 2: delete existing actual costs for all jobs in this CSV ---
+    // This is safe because the CSV from LP is always the full cost record.
+    // Fixes NULL invoice_date upsert collision (Postgres NULL != NULL in unique constraints).
+    const jobIdArray = Array.from(seenJobIds)
+    if (jobIdArray.length > 0) {
+      const { error: deleteErr } = await supabase
+        .from('job_costs')
+        .delete()
+        .eq('cost_type', 'actual')
+        .in('lp_job_id', jobIdArray)
+
+      if (deleteErr) {
+        console.error('Delete error before reinsert:', deleteErr.message)
+        return res.status(500).json({ error: deleteErr.message })
+      }
+    }
+
+    // --- PASS 3: insert all rows fresh ---
+    let rowsImported = 0
+    let mismeasuresCreated = 0
+
+    for (const rowData of parsedRows) {
       const { data: costRow, error: costErr } = await supabase
         .from('job_costs')
-        .upsert({
-          lp_job_id,
-          cost_type: 'actual',
-          mat_type: matType,
-          category,
-          is_sub: cat?.is_sub ?? null,
-          qty: parseFloat(qty) || null,
-          total_cost: cost,
-          labor_comment: laborComment,
-          invoice_date: invoiceDate || null,
-          comments: comments || null,
-          source: 'lp_csv'
-        }, { onConflict: 'lp_job_id,cost_type,mat_type,invoice_date' })
+        .insert(rowData)
         .select()
         .single()
 
       if (costErr) {
-        console.error(`Cost upsert error job ${lp_job_id} ${matType}:`, costErr.message)
+        console.error(`Cost insert error job ${rowData.lp_job_id} ${rowData.mat_type}:`, costErr.message)
         continue
       }
 
       rowsImported++
 
-      if (completionDate) {
-        const d = new Date(completionDate)
-        if (!isNaN(d.getTime())) {
-          await supabase.from('jobs')
-            .update({
-              completed_at: d.toISOString().split('T')[0],
-              last_cost_scraped_at: new Date().toISOString()
-            })
-            .eq('lp_job_id', lp_job_id)
-        }
+      // Auto-create mismeasure record if category is Mismeasure
+      if (rowData.category === 'Mismeasure' && costRow?.id) {
+        const { error: mmErr } = await supabase.from('mismeasures').upsert({
+          lp_job_id: rowData.lp_job_id,
+          job_cost_id: costRow.id,
+          cost: rowData.total_cost,
+          status: 'pending',
+          invoice_date: rowData.invoice_date || null,
+          lp_comments: rowData.comments || null
+        }, { onConflict: 'job_cost_id' })
+
+        if (!mmErr) mismeasuresCreated++
       }
+    }
 
-      if (category === 'Mismeasure') {
-        // Fetch the cost row id if upsert didn't return it
-        let costId = costRow?.id
-        if (!costId) {
-          const { data: existing } = await supabase
-            .from('job_costs')
-            .select('id')
-            .eq('lp_job_id', lp_job_id)
-            .eq('cost_type', 'actual')
-            .eq('mat_type', matType)
-            .eq('invoice_date', invoiceDate || null)
-            .single()
-          costId = existing?.id
-        }
-        if (costId) {
-          const { error: mmErr } = await supabase.from('mismeasures').upsert({
-            lp_job_id,
-            job_cost_id: costId,
-            cost,
-            status: 'pending',
-            invoice_date: invoiceDate || null,
-            lp_comments: comments || null
-          }, { onConflict: 'job_cost_id' })
-
-          if (!mmErr) mismeasuresCreated++
-        }
+    // --- PASS 4: update completed_at on jobs where CompletionDate was in CSV ---
+    for (const [jobIdStr, dateStr] of Object.entries(completionDates)) {
+      const d = new Date(dateStr)
+      if (!isNaN(d.getTime())) {
+        await supabase.from('jobs')
+          .update({
+            completed_at: d.toISOString().split('T')[0],
+            last_cost_scraped_at: new Date().toISOString()
+          })
+          .eq('lp_job_id', parseInt(jobIdStr))
       }
     }
 
     return res.json({
       success: true,
+      jobsAffected: jobIdArray.length,
       rowsImported,
       mismeasuresCreated,
       unknownMatTypes
@@ -204,21 +222,6 @@ router.post('/:lp_job_id/estimated', async (req, res) => {
 
 
 // GET /api/costs/:lp_job_id
-router.get('/:lp_job_id', async (req, res) => {
-  const lp_job_id = parseInt(req.params.lp_job_id)
-  if (!lp_job_id) return res.status(400).json({ error: 'lp_job_id required' })
-
-  const { data, error } = await supabase
-    .from('job_costs')
-    .select('*')
-    .eq('lp_job_id', lp_job_id)
-    .order('cost_type', { ascending: true })
-    .order('category', { ascending: true })
-
-  if (error) return res.status(500).json({ error: error.message })
-  res.json(data)
-})
-
 router.get('/:lp_job_id', async (req, res) => {
   const lp_job_id = parseInt(req.params.lp_job_id)
   if (!lp_job_id) return res.status(400).json({ error: 'lp_job_id required' })
