@@ -6,7 +6,6 @@ const ACTIVE_STATUSES = ['SN','PU','SS','MR','D','B','1','2','3','NS','SV','S','
 const CLOSED_STATUSES = ['C','P','E','X','G','J','L']
 const ALL_STATUSES = [...ACTIVE_STATUSES, ...CLOSED_STATUSES]
 const MEASURE_SHEET_STATUSES = ['SN', 'PU', 'SS']
-const CLOSED_START_DATE = new Date(Date.now() - 220 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
 function mapJob(raw: any) {
   return {
@@ -38,8 +37,6 @@ export async function syncActiveJobs() {
   let sheetsCreated = 0
 
   for (const status of ALL_STATUSES) {
-    const isClosed = CLOSED_STATUSES.includes(status)
-    const startdate = isClosed ? CLOSED_START_DATE : '2020-01-01'
     let page = 1
     let hasMore = true
 
@@ -47,7 +44,7 @@ export async function syncActiveJobs() {
       try {
         const result = await lpPost('Customers/GetJobStatusChanges', {
           jbs_id: status,
-          startdate,
+          startdate: '2020-01-01',
           enddate: '2099-12-31',
           PageSize: '250',
           StartIndex: String((page - 1) * 250 + 1),
