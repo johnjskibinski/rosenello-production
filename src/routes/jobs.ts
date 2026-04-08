@@ -283,4 +283,51 @@ router.post('/backfill-completed-dates', async (req, res) => {
   }
 })
 
+// POST /api/jobs/backfill-dates-from-summary
+// Uses LP summary CSV (job_id + CompleteDate) to populate completed_at
+router.post('/backfill-dates-from-summary', async (req, res) => {
+  try {
+    const { csv } = req.body
+    if (!csv) return res.status(400).json({ error: 'csv required' })
+
+    const lines = csv.split('\n').map((l: string) => l.trim()).filter(Boolean)
+    if (lines.length < 2) return res.status(400).json({ error: 'no data rows' })
+
+    const headers = lines[0].replace(/"/g, '').split(',').map((h: string) => h.trim())
+    const jobIdIdx   = headers.indexOf('job_id')
+    const dateIdx    = headers.indexOf('CompleteDate')
+
+    if (jobIdIdx === -1 || dateIdx === -1) {
+      return res.status(400).json({ error: `Missing columns. Need job_id and CompleteDate. Found: ${headers.join(', ')}` })
+    }
+
+    let updated = 0
+    let skipped = 0
+
+    for (let i = 1; i < lines.length; i++) {
+      const row = lines[i].split(',').map((v: string) => v.replace(/"/g, '').trim())
+      const lp_job_id = parseInt(row[jobIdIdx])
+      const dateRaw   = row[dateIdx]
+
+      if (!lp_job_id || !dateRaw) { skipped++; continue }
+      const d = new Date(dateRaw)
+      if (isNaN(d.getTime())) { skipped++; continue }
+
+      const completed_at = d.toISOString().split('T')[0]
+      const { error } = await supabase
+        .from('jobs')
+        .update({ completed_at })
+        .eq('lp_job_id', lp_job_id)
+
+      if (error) { skipped++; continue }
+      updated++
+    }
+
+    return res.json({ success: true, updated, skipped })
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+
 export default router
