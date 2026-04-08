@@ -223,7 +223,6 @@ router.post('/:lp_job_id/upload-docs/:tabName', async (req, res) => {
   }
 })
 
-export default router;
 
 // POST /api/jobs/backfill-completed-dates
 // Accepts the LP summary CSV, updates completed_at for each job using lp_job_id
@@ -236,7 +235,7 @@ router.post('/backfill-completed-dates', async (req, res) => {
     if (lines.length < 2) return res.status(400).json({ error: 'no data rows' })
 
     const headers = lines[0].replace(/"/g, '').split(',').map((h: string) => h.trim())
-    const col = (row: string[], name: string) => {
+    const col2 = (row: string[], name: string) => {
       const i = headers.indexOf(name)
       return i >= 0 ? row[i]?.replace(/"/g, '').trim() : ''
     }
@@ -271,3 +270,5 @@ router.post('/backfill-completed-dates', async (req, res) => {
     return res.status(500).json({ error: err.message })
   }
 })
+
+export default router
