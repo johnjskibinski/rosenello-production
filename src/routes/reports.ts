@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase'
 
 const router = Router()
 
-// GET /api/reports/financial
 router.get('/financial', async (req, res) => {
   try {
     const {
@@ -15,7 +14,6 @@ router.get('/financial', async (req, res) => {
       labor_type = 'both'
     } = req.query as Record<string, string>
 
-    // Build jobs filter
     let jobsQuery = supabase
       .from('jobs')
       .select('lp_job_id, gross_amount, commission_amt, product, completed_at, contract_date, lp_status')
@@ -23,10 +21,7 @@ router.get('/financial', async (req, res) => {
 
     if (start_date) jobsQuery = jobsQuery.gte(date_field, start_date)
     if (end_date) jobsQuery = jobsQuery.lte(date_field, end_date)
-    if (product) {
-      const products = product.split(',')
-      jobsQuery = jobsQuery.in('product', products)
-    }
+    if (product) jobsQuery = jobsQuery.in('product', product.split(','))
 
     const { data: jobs, error: jobsError } = await jobsQuery
     if (jobsError) return res.status(500).json({ error: jobsError.message })
@@ -34,23 +29,21 @@ router.get('/financial', async (req, res) => {
 
     const jobIds = jobs.map(j => j.lp_job_id)
 
-    // Get all actual costs for these jobs
-    let costsQuery = supabase
+    const { data: costs, error: costsError } = await supabase
       .from('job_costs')
       .select('lp_job_id, category, is_sub, total_cost, mat_type')
       .eq('cost_type', 'actual')
       .in('lp_job_id', jobIds)
 
-    const { data: costs, error: costsError } = await costsQuery
     if (costsError) return res.status(500).json({ error: costsError.message })
 
-    // Build cost map per job
+    // Build cost map per job from job_costs rows
     const costMap: Record<number, any> = {}
     for (const c of (costs || [])) {
       if (!costMap[c.lp_job_id]) {
         costMap[c.lp_job_id] = {
           materials: 0, labor_inhouse: 0, labor_sub: 0, labor_ambiguous: 0,
-          commission: 0, finance: 0, mismeasure: 0, other: 0, total: 0
+          finance: 0, mismeasure: 0, other: 0
         }
       }
       const m = costMap[c.lp_job_id]
@@ -62,15 +55,11 @@ router.get('/financial', async (req, res) => {
         else if (c.is_sub === true) m.labor_sub += cost
         else m.labor_ambiguous += cost
       }
-      else if (c.category === 'Commission') m.commission += cost
       else if (c.category === 'Finance' || c.category === 'Credit Card Fee') m.finance += cost
       else if (c.category === 'Mismeasure') m.mismeasure += cost
       else m.other += cost
-
-      m.total += cost
     }
 
-    // Group jobs by period
     const getPeriodKey = (dateStr: string) => {
       if (!dateStr) return 'Unknown'
       const d = new Date(dateStr)
@@ -94,50 +83,41 @@ router.get('/financial', async (req, res) => {
       if (!periods[key]) {
         periods[key] = {
           period: key,
-          job_count: 0,
-          gross: 0,
-          materials: 0,
-          labor_inhouse: 0,
-          labor_sub: 0,
-          labor_ambiguous: 0,
-          commission: 0,
-          finance: 0,
-          mismeasure: 0,
-          other: 0,
-          total_cost: 0,
-          gross_profit: 0,
-          margin_pct: 0
+          job_count: 0, gross: 0, materials: 0,
+          labor_inhouse: 0, labor_sub: 0, labor_ambiguous: 0,
+          commission: 0, finance: 0, mismeasure: 0, other: 0,
+          total_cost: 0, gross_profit: 0, margin_pct: 0
         }
       }
 
       const p = periods[key]
-      const costs = costMap[job.lp_job_id] || {}
+      const c = costMap[job.lp_job_id] || {}
       const gross = parseFloat(job.gross_amount) || 0
+      // Commission comes from jobs table directly — LP doesn't include it in cost CSV
+      const commission = parseFloat(job.commission_amt) || 0
 
-      // Apply labor_type filter
       let laborCost = 0
-      if (labor_type === 'inhouse') laborCost = costs.labor_inhouse || 0
-      else if (labor_type === 'sub') laborCost = costs.labor_sub || 0
-      else laborCost = (costs.labor_inhouse || 0) + (costs.labor_sub || 0) + (costs.labor_ambiguous || 0)
+      if (labor_type === 'inhouse') laborCost = c.labor_inhouse || 0
+      else if (labor_type === 'sub') laborCost = c.labor_sub || 0
+      else laborCost = (c.labor_inhouse || 0) + (c.labor_sub || 0) + (c.labor_ambiguous || 0)
 
-      const totalCost = (costs.materials || 0) + laborCost + (costs.commission || 0) +
-        (costs.finance || 0) + (costs.mismeasure || 0) + (costs.other || 0)
+      const totalCost = (c.materials || 0) + laborCost + commission +
+        (c.finance || 0) + (c.mismeasure || 0) + (c.other || 0)
 
       p.job_count++
       p.gross += gross
-      p.materials += costs.materials || 0
-      p.labor_inhouse += costs.labor_inhouse || 0
-      p.labor_sub += costs.labor_sub || 0
-      p.labor_ambiguous += costs.labor_ambiguous || 0
-      p.commission += costs.commission || 0
-      p.finance += costs.finance || 0
-      p.mismeasure += costs.mismeasure || 0
-      p.other += costs.other || 0
+      p.materials += c.materials || 0
+      p.labor_inhouse += c.labor_inhouse || 0
+      p.labor_sub += c.labor_sub || 0
+      p.labor_ambiguous += c.labor_ambiguous || 0
+      p.commission += commission
+      p.finance += c.finance || 0
+      p.mismeasure += c.mismeasure || 0
+      p.other += c.other || 0
       p.total_cost += totalCost
       p.gross_profit += gross - totalCost
     }
 
-    // Calculate margins
     const rows = Object.values(periods)
       .sort((a: any, b: any) => a.period.localeCompare(b.period))
       .map((p: any) => ({
@@ -148,7 +128,6 @@ router.get('/financial', async (req, res) => {
         margin_pct: p.gross > 0 ? Math.round((p.gross_profit / p.gross) * 1000) / 10 : 0
       }))
 
-    // Overall summary
     const summary = rows.reduce((acc: any, r: any) => ({
       job_count: (acc.job_count || 0) + r.job_count,
       gross: (acc.gross || 0) + r.gross,
@@ -157,6 +136,7 @@ router.get('/financial', async (req, res) => {
       materials: (acc.materials || 0) + r.materials,
       labor_inhouse: (acc.labor_inhouse || 0) + r.labor_inhouse,
       labor_sub: (acc.labor_sub || 0) + r.labor_sub,
+      commission: (acc.commission || 0) + r.commission,
       mismeasure: (acc.mismeasure || 0) + r.mismeasure,
     }), {})
 
@@ -170,17 +150,9 @@ router.get('/financial', async (req, res) => {
   }
 })
 
-// GET /api/reports/mismeasures
-router.get('/mismeasures', async (req, res) => {
+router.get('/mismeasure', async (req, res) => {
   try {
-    const {
-      start_date,
-      end_date,
-      product,
-      status,
-      error_type,
-      group_by = 'month'
-    } = req.query as Record<string, string>
+    const { start_date, end_date, product, status, error_type } = req.query as Record<string, string>
 
     let query = supabase
       .from('mismeasures')
@@ -198,14 +170,12 @@ router.get('/mismeasures', async (req, res) => {
     const { data: mismeasures, error } = await query
     if (error) return res.status(500).json({ error: error.message })
 
-    // Filter by product if specified
     let filtered = (mismeasures || [])
     if (product) {
       const products = product.split(',')
       filtered = filtered.filter((m: any) => products.includes(m.jobs?.product))
     }
 
-    // Summary stats
     const summary = {
       total_events: filtered.length,
       total_jobs: new Set(filtered.map((m: any) => m.lp_job_id)).size,
