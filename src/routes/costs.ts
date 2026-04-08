@@ -3,6 +3,29 @@ import { supabase } from '../lib/supabase'
 
 const router = Router()
 
+// Subs who appear in the LP "Labor" comments field.
+// Anyone NOT in this list (but has a comment) → in-house.
+// Blank comment → is_sub = null (unidentified, surfaces on Admin page).
+const SUB_LABOR_NAMES = new Set([
+  'Ricardo',
+  'STK',
+  'Profix',
+  'Mathus',
+  'Antoine',
+  'Jeremiah',
+  'Richy',
+  'Mike K',
+])
+
+function resolveIsSubFromComment(comments: string | null): boolean | null {
+  if (!comments || !comments.trim()) return null
+  const name = comments.trim().toLowerCase()
+  for (const sub of SUB_LABOR_NAMES) {
+    if (name.includes(sub.toLowerCase())) return true
+  }
+  return false
+}
+
 // POST /api/costs/import-csv
 router.post('/import-csv', async (req, res) => {
   try {
@@ -22,7 +45,6 @@ router.post('/import-csv', async (req, res) => {
     const catMap: Record<string, any> = {}
     for (const c of (cats || [])) catMap[c.mat_type] = c
 
-    // Load all jobs into memory for fast lookup
     const { data: allJobs } = await supabase
       .from('jobs')
       .select('lp_job_id, contract_id')
@@ -38,9 +60,7 @@ router.post('/import-csv', async (req, res) => {
       }
     }
 
-    // --- PASS 1: parse all rows and resolve lp_job_ids ---
-    // This lets us delete-then-reinsert cleanly, avoiding the
-    // NULL invoice_date upsert collision bug in Postgres.
+    // PASS 1: parse all rows
     const parsedRows: any[] = []
     const unknownMatTypes: string[] = []
     const seenJobIds = new Set<number>()
@@ -79,8 +99,12 @@ router.post('/import-csv', async (req, res) => {
       const category = cat?.category || null
       if (!cat && !unknownMatTypes.includes(matType)) unknownMatTypes.push(matType)
 
-      seenJobIds.add(lp_job_id)
+      let is_sub: boolean | null = cat?.is_sub ?? null
+      if (matType === 'Labor' && category === 'Labor') {
+        is_sub = resolveIsSubFromComment(comments || null)
+      }
 
+      seenJobIds.add(lp_job_id)
       if (completionDate) completionDates[lp_job_id] = completionDate
 
       parsedRows.push({
@@ -88,19 +112,17 @@ router.post('/import-csv', async (req, res) => {
         cost_type: 'actual',
         mat_type: matType,
         category,
-        is_sub: cat?.is_sub ?? null,
+        is_sub,
         qty: parseFloat(qty) || null,
         total_cost: cost,
-        labor_comment: matType === 'Labor' && comments ? comments : null,
+        labor_comment: category === 'Labor' && comments ? comments : null,
         invoice_date: invoiceDate || null,
         comments: comments || null,
         source: 'lp_csv'
       })
     }
 
-    // --- PASS 2: delete existing actual costs for all jobs in this CSV ---
-    // This is safe because the CSV from LP is always the full cost record.
-    // Fixes NULL invoice_date upsert collision (Postgres NULL != NULL in unique constraints).
+    // PASS 2: delete existing actual costs for all jobs in this CSV
     const jobIdArray = Array.from(seenJobIds)
     if (jobIdArray.length > 0) {
       const { error: deleteErr } = await supabase
@@ -115,7 +137,7 @@ router.post('/import-csv', async (req, res) => {
       }
     }
 
-    // --- PASS 3: insert all rows fresh ---
+    // PASS 3: insert all rows fresh
     let rowsImported = 0
     let mismeasuresCreated = 0
 
@@ -133,7 +155,6 @@ router.post('/import-csv', async (req, res) => {
 
       rowsImported++
 
-      // Auto-create mismeasure record if category is Mismeasure
       if (rowData.category === 'Mismeasure' && costRow?.id) {
         const { error: mmErr } = await supabase.from('mismeasures').upsert({
           lp_job_id: rowData.lp_job_id,
@@ -148,7 +169,7 @@ router.post('/import-csv', async (req, res) => {
       }
     }
 
-    // --- PASS 4: update completed_at on jobs where CompletionDate was in CSV ---
+    // PASS 4: update completed_at on jobs
     for (const [jobIdStr, dateStr] of Object.entries(completionDates)) {
       const d = new Date(dateStr)
       if (!isNaN(d.getTime())) {
@@ -219,7 +240,6 @@ router.post('/:lp_job_id/estimated', async (req, res) => {
     return res.status(500).json({ error: err.message })
   }
 })
-
 
 // GET /api/costs/:lp_job_id
 router.get('/:lp_job_id', async (req, res) => {
