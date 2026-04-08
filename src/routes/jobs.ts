@@ -234,38 +234,50 @@ router.post('/backfill-completed-dates', async (req, res) => {
     const lines = csv.split('\n').map((l: string) => l.trim()).filter(Boolean)
     if (lines.length < 2) return res.status(400).json({ error: 'no data rows' })
 
+    // Parse headers — strip quotes
     const headers = lines[0].replace(/"/g, '').split(',').map((h: string) => h.trim())
-    const col = (row: string[], name: string) => {
-      const i = headers.indexOf(name)
-      return i >= 0 ? row[i]?.replace(/"/g, '').trim() : ''
+    const idx = (name: string) => headers.indexOf(name)
+    const contractIdx    = idx('contractid')
+    const completionIdx  = idx('CompletionDate')
+
+    if (contractIdx === -1 || completionIdx === -1) {
+      return res.status(400).json({ error: `Missing columns. Found: ${headers.join(', ')}` })
+    }
+
+    // Build contract_id -> completion_date map (one per contract, take first seen)
+    const contractDates: Record<string, string> = {}
+    for (let i = 1; i < lines.length; i++) {
+      const row: string[] = []
+      let inQuote = false
+      let current = ''
+      for (const ch of lines[i]) {
+        if (ch === '"') { inQuote = !inQuote; continue }
+        if (ch === ',' && !inQuote) { row.push(current.trim()); current = ''; continue }
+        current += ch
+      }
+      row.push(current.trim())
+
+      const contractId     = row[contractIdx]?.trim()
+      const completionDate = row[completionIdx]?.trim()
+      if (!contractId || !completionDate || contractDates[contractId]) continue
+      const d = new Date(completionDate)
+      if (!isNaN(d.getTime())) contractDates[contractId] = d.toISOString().split('T')[0]
     }
 
     let updated = 0
     let skipped = 0
 
-    for (let i = 1; i < lines.length; i++) {
-      const row = lines[i].split(',').map((v: string) => v.replace(/"/g, '').trim())
-      const jobId = parseInt(col(row, 'job_id'))
-      const completeDateRaw = col(row, 'CompletionDate')
-
-      if (!jobId || !completeDateRaw) { skipped++; continue }
-
-      const d = new Date(completeDateRaw)
-      if (isNaN(d.getTime())) { skipped++; continue }
-
-      const completed_at = d.toISOString().split('T')[0]
-
+    for (const [contractId, completed_at] of Object.entries(contractDates)) {
       const { error } = await supabase
         .from('jobs')
         .update({ completed_at })
-        .eq('lp_job_id', jobId)
-        .is('completed_at', null)  // only update if not already set
+        .eq('contract_id', contractId)
 
       if (error) { skipped++; continue }
       updated++
     }
 
-    return res.json({ success: true, updated, skipped })
+    return res.json({ success: true, updated, skipped, contractsProcessed: Object.keys(contractDates).length })
   } catch (err: any) {
     return res.status(500).json({ error: err.message })
   }
