@@ -330,4 +330,36 @@ router.post('/backfill-dates-from-summary', async (req, res) => {
 })
 
 
+// POST /api/jobs/bulk-set-completed-dates
+// Accepts array of {lp_job_id, completed_at} and updates each job
+router.post('/bulk-set-completed-dates', async (req, res) => {
+  try {
+    const { updates } = req.body
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'updates array required' })
+    }
+
+    let updated = 0
+    let skipped = 0
+
+    for (const u of updates) {
+      const { lp_job_id, completed_at } = u
+      if (!lp_job_id || !completed_at) { skipped++; continue }
+
+      const { error } = await supabase
+        .from('jobs')
+        .update({ completed_at })
+        .eq('lp_job_id', lp_job_id)
+
+      if (error) { skipped++; continue }
+      updated++
+    }
+
+    return res.json({ success: true, updated, skipped })
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+
 export default router
