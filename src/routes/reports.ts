@@ -16,7 +16,7 @@ router.get('/financial', async (req, res) => {
 
     let jobsQuery = supabase
       .from('jobs')
-      .select('lp_job_id, gross_amount, product, completed_at, contract_date, lp_status')
+      .select('lp_job_id, gross_amount, product, completed_at, contract_date, lp_status, contract_id, customer_first, customer_last')
       .not('gross_amount', 'is', null)
 
     if (start_date) jobsQuery = jobsQuery.gte(date_field, start_date)
@@ -37,8 +37,6 @@ router.get('/financial', async (req, res) => {
 
     if (costsError) return res.status(500).json({ error: costsError.message })
 
-    // Build cost map per job from job_costs rows only
-    // Commission comes from job_costs (source=lp_raw_data) — NOT from jobs.commission_amt
     const costMap: Record<number, any> = {}
     for (const c of (costs || [])) {
       if (!costMap[c.lp_job_id]) {
@@ -49,7 +47,6 @@ router.get('/financial', async (req, res) => {
       }
       const m = costMap[c.lp_job_id]
       const cost = parseFloat(c.total_cost) || 0
-
       if (c.category === 'Materials') m.materials += cost
       else if (c.category === 'Labor') {
         if (c.is_sub === false) m.labor_inhouse += cost
@@ -84,11 +81,11 @@ router.get('/financial', async (req, res) => {
 
       if (!periods[key]) {
         periods[key] = {
-          period: key,
-          job_count: 0, gross: 0, materials: 0,
-          labor_inhouse: 0, labor_sub: 0, labor_ambiguous: 0,
+          period: key, job_count: 0, gross: 0,
+          materials: 0, labor_inhouse: 0, labor_sub: 0, labor_ambiguous: 0,
           commission: 0, finance: 0, mismeasure: 0, other: 0,
-          total_cost: 0, gross_profit: 0, margin_pct: 0
+          total_cost: 0, gross_profit: 0, margin_pct: 0,
+          job_rows: []
         }
       }
 
@@ -103,6 +100,8 @@ router.get('/financial', async (req, res) => {
 
       const totalCost = (c.materials || 0) + laborCost + (c.commission || 0) +
         (c.finance || 0) + (c.mismeasure || 0) + (c.other || 0)
+      const grossProfit = gross - totalCost
+      const marginPct = gross > 0 ? Math.round((grossProfit / gross) * 1000) / 10 : 0
 
       p.job_count++
       p.gross += gross
@@ -115,7 +114,30 @@ router.get('/financial', async (req, res) => {
       p.mismeasure += c.mismeasure || 0
       p.other += c.other || 0
       p.total_cost += totalCost
-      p.gross_profit += gross - totalCost
+      p.gross_profit += grossProfit
+
+      p.job_rows.push({
+        lp_job_id:      job.lp_job_id,
+        contract_id:    job.contract_id,
+        customer:       `${job.customer_first} ${job.customer_last}`,
+        product:        job.product,
+        completed_at:   job.completed_at,
+        gross:          Math.round(gross * 100) / 100,
+        materials:      Math.round((c.materials || 0) * 100) / 100,
+        labor_inhouse:  Math.round((c.labor_inhouse || 0) * 100) / 100,
+        labor_sub:      Math.round((c.labor_sub || 0) * 100) / 100,
+        labor_ambiguous:Math.round((c.labor_ambiguous || 0) * 100) / 100,
+        commission:     Math.round((c.commission || 0) * 100) / 100,
+        finance:        Math.round((c.finance || 0) * 100) / 100,
+        mismeasure:     Math.round((c.mismeasure || 0) * 100) / 100,
+        other:          Math.round((c.other || 0) * 100) / 100,
+        total_cost:     Math.round(totalCost * 100) / 100,
+        gross_profit:   Math.round(grossProfit * 100) / 100,
+        margin_pct:     marginPct,
+        mat_pct:        gross > 0 ? Math.round(((c.materials || 0) / gross) * 1000) / 10 : 0,
+        labor_pct:      gross > 0 ? Math.round((laborCost / gross) * 1000) / 10 : 0,
+        comm_pct:       gross > 0 ? Math.round(((c.commission || 0) / gross) * 1000) / 10 : 0,
+      })
     }
 
     const rows = Object.values(periods)
@@ -125,24 +147,25 @@ router.get('/financial', async (req, res) => {
         gross: Math.round(p.gross * 100) / 100,
         total_cost: Math.round(p.total_cost * 100) / 100,
         gross_profit: Math.round(p.gross_profit * 100) / 100,
-        margin_pct: p.gross > 0 ? Math.round((p.gross_profit / p.gross) * 1000) / 10 : 0
+        margin_pct: p.gross > 0 ? Math.round((p.gross_profit / p.gross) * 1000) / 10 : 0,
+        job_rows: p.job_rows.sort((a: any, b: any) =>
+          (b.completed_at || '').localeCompare(a.completed_at || ''))
       }))
 
     const summary = rows.reduce((acc: any, r: any) => ({
-      job_count: (acc.job_count || 0) + r.job_count,
-      gross: (acc.gross || 0) + r.gross,
-      total_cost: (acc.total_cost || 0) + r.total_cost,
+      job_count:    (acc.job_count || 0) + r.job_count,
+      gross:        (acc.gross || 0) + r.gross,
+      total_cost:   (acc.total_cost || 0) + r.total_cost,
       gross_profit: (acc.gross_profit || 0) + r.gross_profit,
-      materials: (acc.materials || 0) + r.materials,
-      labor_inhouse: (acc.labor_inhouse || 0) + r.labor_inhouse,
-      labor_sub: (acc.labor_sub || 0) + r.labor_sub,
-      commission: (acc.commission || 0) + r.commission,
-      mismeasure: (acc.mismeasure || 0) + r.mismeasure,
+      materials:    (acc.materials || 0) + r.materials,
+      labor_inhouse:(acc.labor_inhouse || 0) + r.labor_inhouse,
+      labor_sub:    (acc.labor_sub || 0) + r.labor_sub,
+      commission:   (acc.commission || 0) + r.commission,
+      mismeasure:   (acc.mismeasure || 0) + r.mismeasure,
     }), {})
 
     summary.margin_pct = summary.gross > 0
-      ? Math.round((summary.gross_profit / summary.gross) * 1000) / 10
-      : 0
+      ? Math.round((summary.gross_profit / summary.gross) * 1000) / 10 : 0
 
     return res.json({ rows, summary })
   } catch (err: any) {
@@ -197,8 +220,6 @@ router.get('/mismeasure', async (req, res) => {
   }
 })
 
-export default router
-
 router.get('/variance', async (req, res) => {
   try {
     const { start_date, end_date, product } = req.query as Record<string, string>
@@ -252,15 +273,13 @@ router.get('/variance', async (req, res) => {
         const variance = c.actual - c.estimated
         const variance_pct = c.estimated > 0 ? Math.round((variance / c.estimated) * 1000) / 10 : null
         return {
-          lp_job_id:    j.lp_job_id,
-          contract_id:  j.contract_id,
-          customer:     `${j.customer_first} ${j.customer_last}`,
-          product:      j.product,
-          completed_at: j.completed_at,
-          gross:        parseFloat(j.gross_amount) || 0,
-          estimated:    Math.round(c.estimated * 100) / 100,
-          actual:       Math.round(c.actual * 100) / 100,
-          variance:     Math.round(variance * 100) / 100,
+          lp_job_id: j.lp_job_id, contract_id: j.contract_id,
+          customer: `${j.customer_first} ${j.customer_last}`,
+          product: j.product, completed_at: j.completed_at,
+          gross: parseFloat(j.gross_amount) || 0,
+          estimated: Math.round(c.estimated * 100) / 100,
+          actual: Math.round(c.actual * 100) / 100,
+          variance: Math.round(variance * 100) / 100,
           variance_pct,
         }
       })
@@ -281,3 +300,5 @@ router.get('/variance', async (req, res) => {
     return res.status(500).json({ error: err.message })
   }
 })
+
+export default router
