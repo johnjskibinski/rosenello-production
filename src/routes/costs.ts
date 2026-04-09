@@ -266,9 +266,17 @@ router.post('/:lp_job_id/estimated', async (req, res) => {
 
     if (rows.length === 0) return res.status(400).json({ error: 'estimated_labor or estimated_materials required' })
 
+    // Delete existing estimated rows before reinserting to avoid $0 duplicates
+    await supabase
+      .from('job_costs')
+      .delete()
+      .eq('lp_job_id', lp_job_id)
+      .eq('cost_type', 'estimated')
+      .eq('source', 'costing_sheet')
+
     const { error } = await supabase
       .from('job_costs')
-      .upsert(rows, { onConflict: 'lp_job_id,cost_type,mat_type,invoice_date' })
+      .insert(rows)
 
     if (error) return res.status(500).json({ error: error.message })
 
