@@ -3,18 +3,8 @@ import { supabase } from '../lib/supabase'
 
 const router = Router()
 
-// Subs who appear in the LP "Labor" comments field.
-// Anyone NOT in this list (but has a comment) → in-house.
-// Blank comment → is_sub = null (unidentified, surfaces on Admin page).
 const SUB_LABOR_NAMES = new Set([
-  'Ricardo',
-  'STK',
-  'Profix',
-  'Mathus',
-  'Antoine',
-  'Jeremiah',
-  'Richy',
-  'Mike K',
+  'Ricardo', 'STK', 'Profix', 'Mathus', 'Antoine', 'Jeremiah', 'Richy', 'Mike K',
 ])
 
 function resolveIsSubFromComment(comments: string | null): boolean | null {
@@ -45,24 +35,24 @@ router.post('/import-csv', async (req, res) => {
     const catMap: Record<string, any> = {}
     for (const c of (cats || [])) catMap[c.mat_type] = c
 
+    // Composite key: "contractid|lastname|firstname" → lp_job_id
+    // contractid alone is NOT unique in LP — this is the only safe match
     const { data: allJobs } = await supabase
       .from('jobs')
-      .select('lp_job_id, contract_id')
-    const jobByContractId: Record<string, number> = {}
-    const jobByNumericPrefix: Record<string, number> = {}
+      .select('lp_job_id, contract_id, customer_first, customer_last')
+
+    const jobByCompositeKey: Record<string, number> = {}
     for (const j of (allJobs || [])) {
-      if (j.contract_id) {
-        jobByContractId[j.contract_id] = j.lp_job_id
-        const prefix = j.contract_id.split('-')[0]
-        if (prefix && !jobByNumericPrefix[prefix]) {
-          jobByNumericPrefix[prefix] = j.lp_job_id
-        }
-      }
+      if (!j.contract_id) continue
+      const last = (j.customer_last || '').trim().toLowerCase()
+      const first = (j.customer_first || '').trim().toLowerCase()
+      const key = `${j.contract_id}|${last}|${first}`
+      jobByCompositeKey[key] = j.lp_job_id
     }
 
-    // PASS 1: parse all rows
     const parsedRows: any[] = []
     const unknownMatTypes: string[] = []
+    const unmatchedRows: string[] = []
     const seenJobIds = new Set<number>()
     const completionDates: Record<number, string> = {}
 
@@ -78,6 +68,8 @@ router.post('/import-csv', async (req, res) => {
       row.push(current)
 
       const contractid = col(row, 'contractid') || col(row, 'GroupBy')
+      const lastName = col(row, 'LastName').trim().toLowerCase()
+      const firstName = col(row, 'FirstName').trim().toLowerCase()
       const matType = col(row, 'MatType')
       const costStr = col(row, 'Cost')
       const qty = col(row, 'Qty')
@@ -88,12 +80,14 @@ router.post('/import-csv', async (req, res) => {
       if (!contractid || !matType) continue
       const cost = parseFloat(costStr) || 0
 
-      let lp_job_id = jobByContractId[contractid]
+      const compositeKey = `${contractid}|${lastName}|${firstName}`
+      const lp_job_id = jobByCompositeKey[compositeKey]
+
       if (!lp_job_id) {
-        const numericPrefix = contractid.split('-')[0]
-        if (numericPrefix) lp_job_id = jobByNumericPrefix[numericPrefix]
+        const unmatched = `${contractid} / ${lastName}, ${firstName}`
+        if (!unmatchedRows.includes(unmatched)) unmatchedRows.push(unmatched)
+        continue
       }
-      if (!lp_job_id) continue
 
       const cat = catMap[matType]
       const category = cat?.category || null
@@ -122,13 +116,14 @@ router.post('/import-csv', async (req, res) => {
       })
     }
 
-    // PASS 2: delete existing actual costs for all jobs in this CSV
+    // Delete only lp_csv actual costs — never touches commissions from lp_raw_data
     const jobIdArray = Array.from(seenJobIds)
     if (jobIdArray.length > 0) {
       const { error: deleteErr } = await supabase
         .from('job_costs')
         .delete()
         .eq('cost_type', 'actual')
+        .eq('source', 'lp_csv')
         .in('lp_job_id', jobIdArray)
 
       if (deleteErr) {
@@ -137,7 +132,6 @@ router.post('/import-csv', async (req, res) => {
       }
     }
 
-    // PASS 3: insert all rows fresh
     let rowsImported = 0
     let mismeasuresCreated = 0
 
@@ -169,7 +163,6 @@ router.post('/import-csv', async (req, res) => {
       }
     }
 
-    // PASS 4: update completed_at on jobs
     for (const [jobIdStr, dateStr] of Object.entries(completionDates)) {
       const d = new Date(dateStr)
       if (!isNaN(d.getTime())) {
@@ -187,7 +180,8 @@ router.post('/import-csv', async (req, res) => {
       jobsAffected: jobIdArray.length,
       rowsImported,
       mismeasuresCreated,
-      unknownMatTypes
+      unknownMatTypes,
+      unmatchedRows
     })
   } catch (err: any) {
     console.error('CSV import error:', err)
