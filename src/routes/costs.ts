@@ -252,3 +252,49 @@ router.get('/:lp_job_id', async (req, res) => {
 })
 
 export default router
+
+// GET /api/costs/unclassified-labor
+router.get('/unclassified-labor', async (req, res) => {
+  const { data: costs, error } = await supabase
+    .from('job_costs')
+    .select('id, lp_job_id, mat_type, total_cost, invoice_date, comments')
+    .eq('cost_type', 'actual')
+    .eq('category', 'Labor')
+    .is('is_sub', null)
+    .order('lp_job_id')
+
+  if (error) return res.status(500).json({ error: error.message })
+
+  const jobIds = [...new Set((costs || []).map((c: any) => c.lp_job_id))]
+  const { data: jobs } = await supabase
+    .from('jobs')
+    .select('lp_job_id, contract_id, customer_first, customer_last, completed_at')
+    .in('lp_job_id', jobIds)
+
+  const jobMap: Record<number, any> = {}
+  for (const j of (jobs || [])) jobMap[j.lp_job_id] = j
+
+  const enriched = (costs || []).map((c: any) => ({
+    ...c,
+    job: jobMap[c.lp_job_id] || null
+  }))
+
+  res.json(enriched)
+})
+
+// PATCH /api/costs/:id/classify
+router.patch('/:id/classify', async (req, res) => {
+  const { id } = req.params
+  const { is_sub } = req.body
+  if (typeof is_sub !== 'boolean') return res.status(400).json({ error: 'is_sub (boolean) required' })
+
+  const { data, error } = await supabase
+    .from('job_costs')
+    .update({ is_sub })
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
