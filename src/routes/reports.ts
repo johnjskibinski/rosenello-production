@@ -198,3 +198,86 @@ router.get('/mismeasure', async (req, res) => {
 })
 
 export default router
+
+router.get('/variance', async (req, res) => {
+  try {
+    const { start_date, end_date, product } = req.query as Record<string, string>
+
+    let allCosts: any[] = []
+    let from = 0
+    const pageSize = 1000
+    while (true) {
+      const { data, error } = await supabase
+        .from('job_costs')
+        .select('lp_job_id, cost_type, total_cost')
+        .range(from, from + pageSize - 1)
+      if (error) return res.status(500).json({ error: error.message })
+      if (!data?.length) break
+      allCosts = allCosts.concat(data)
+      if (data.length < pageSize) break
+      from += pageSize
+    }
+
+    const costMap: Record<number, any> = {}
+    for (const c of allCosts) {
+      if (!costMap[c.lp_job_id]) costMap[c.lp_job_id] = { estimated: 0, actual: 0 }
+      if (c.cost_type === 'estimated') costMap[c.lp_job_id].estimated += c.total_cost
+      if (c.cost_type === 'actual')    costMap[c.lp_job_id].actual    += c.total_cost
+    }
+
+    const bothIds = Object.entries(costMap)
+      .filter(([, c]) => c.estimated > 0 && c.actual > 0)
+      .map(([id]) => parseInt(id))
+
+    if (!bothIds.length) return res.json({ rows: [], summary: {} })
+
+    let jobsQuery = supabase
+      .from('jobs')
+      .select('lp_job_id, contract_id, customer_first, customer_last, gross_amount, product, completed_at, installer_1')
+      .in('lp_job_id', bothIds)
+      .not('completed_at', 'is', null)
+
+    if (start_date) jobsQuery = jobsQuery.gte('completed_at', start_date)
+    if (end_date)   jobsQuery = jobsQuery.lte('completed_at', end_date)
+    if (product)    jobsQuery = jobsQuery.in('product', product.split(','))
+
+    const { data: jobs, error: jobsError } = await jobsQuery
+    if (jobsError) return res.status(500).json({ error: jobsError.message })
+    if (!jobs?.length) return res.json({ rows: [], summary: {} })
+
+    const rows = jobs
+      .sort((a: any, b: any) => (b.completed_at || '').localeCompare(a.completed_at || ''))
+      .map((j: any) => {
+        const c = costMap[j.lp_job_id]
+        const variance = c.actual - c.estimated
+        const variance_pct = c.estimated > 0 ? Math.round((variance / c.estimated) * 1000) / 10 : null
+        return {
+          lp_job_id:    j.lp_job_id,
+          contract_id:  j.contract_id,
+          customer:     `${j.customer_first} ${j.customer_last}`,
+          product:      j.product,
+          completed_at: j.completed_at,
+          gross:        parseFloat(j.gross_amount) || 0,
+          estimated:    Math.round(c.estimated * 100) / 100,
+          actual:       Math.round(c.actual * 100) / 100,
+          variance:     Math.round(variance * 100) / 100,
+          variance_pct,
+        }
+      })
+
+    const summary = {
+      job_count:       rows.length,
+      total_gross:     rows.reduce((s: number, r: any) => s + r.gross, 0),
+      total_estimated: rows.reduce((s: number, r: any) => s + r.estimated, 0),
+      total_actual:    rows.reduce((s: number, r: any) => s + r.actual, 0),
+      total_variance:  rows.reduce((s: number, r: any) => s + r.variance, 0),
+      over_budget:     rows.filter((r: any) => r.variance > 0).length,
+      under_budget:    rows.filter((r: any) => r.variance < 0).length,
+      on_budget:       rows.filter((r: any) => r.variance === 0).length,
+    }
+
+    return res.json({ rows, summary })
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message })
+  }
+})
