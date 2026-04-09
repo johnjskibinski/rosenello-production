@@ -16,7 +16,7 @@ router.get('/financial', async (req, res) => {
 
     let jobsQuery = supabase
       .from('jobs')
-      .select('lp_job_id, gross_amount, commission_amt, product, completed_at, contract_date, lp_status')
+      .select('lp_job_id, gross_amount, product, completed_at, contract_date, lp_status')
       .not('gross_amount', 'is', null)
 
     if (start_date) jobsQuery = jobsQuery.gte(date_field, start_date)
@@ -37,13 +37,14 @@ router.get('/financial', async (req, res) => {
 
     if (costsError) return res.status(500).json({ error: costsError.message })
 
-    // Build cost map per job from job_costs rows
+    // Build cost map per job from job_costs rows only
+    // Commission comes from job_costs (source=lp_raw_data) — NOT from jobs.commission_amt
     const costMap: Record<number, any> = {}
     for (const c of (costs || [])) {
       if (!costMap[c.lp_job_id]) {
         costMap[c.lp_job_id] = {
           materials: 0, labor_inhouse: 0, labor_sub: 0, labor_ambiguous: 0,
-          finance: 0, mismeasure: 0, other: 0
+          commission: 0, finance: 0, mismeasure: 0, other: 0
         }
       }
       const m = costMap[c.lp_job_id]
@@ -55,6 +56,7 @@ router.get('/financial', async (req, res) => {
         else if (c.is_sub === true) m.labor_sub += cost
         else m.labor_ambiguous += cost
       }
+      else if (c.category === 'Commission') m.commission += cost
       else if (c.category === 'Finance' || c.category === 'Credit Card Fee') m.finance += cost
       else if (c.category === 'Mismeasure') m.mismeasure += cost
       else m.other += cost
@@ -93,15 +95,13 @@ router.get('/financial', async (req, res) => {
       const p = periods[key]
       const c = costMap[job.lp_job_id] || {}
       const gross = parseFloat(job.gross_amount) || 0
-      // Commission comes from jobs table directly — LP doesn't include it in cost CSV
-      const commission = parseFloat(job.commission_amt) || 0
 
       let laborCost = 0
       if (labor_type === 'inhouse') laborCost = c.labor_inhouse || 0
       else if (labor_type === 'sub') laborCost = c.labor_sub || 0
       else laborCost = (c.labor_inhouse || 0) + (c.labor_sub || 0) + (c.labor_ambiguous || 0)
 
-      const totalCost = (c.materials || 0) + laborCost + commission +
+      const totalCost = (c.materials || 0) + laborCost + (c.commission || 0) +
         (c.finance || 0) + (c.mismeasure || 0) + (c.other || 0)
 
       p.job_count++
@@ -110,7 +110,7 @@ router.get('/financial', async (req, res) => {
       p.labor_inhouse += c.labor_inhouse || 0
       p.labor_sub += c.labor_sub || 0
       p.labor_ambiguous += c.labor_ambiguous || 0
-      p.commission += commission
+      p.commission += c.commission || 0
       p.finance += c.finance || 0
       p.mismeasure += c.mismeasure || 0
       p.other += c.other || 0
