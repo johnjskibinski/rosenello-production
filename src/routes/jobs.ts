@@ -96,12 +96,21 @@ router.get('/installer-suggestions', async (_, res) => {
 })
 
 router.get('/', async (_, res) => {
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('*')
-    .order('last_synced_at', { ascending: false })
-  if (error) return res.status(500).json({ error: error.message })
-  res.json(data)
+  let all: any[] = []
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('*')
+      .order('last_synced_at', { ascending: false })
+      .range(from, from + 999)
+    if (error) return res.status(500).json({ error: error.message })
+    if (!data?.length) break
+    all = all.concat(data)
+    if (data.length < 1000) break
+    from += 1000
+  }
+  res.json(all)
 })
 
 router.patch('/:lp_job_id/status', async (req, res) => {

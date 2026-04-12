@@ -23,19 +23,35 @@ router.get('/financial', async (req, res) => {
     if (end_date) jobsQuery = jobsQuery.lte(date_field, end_date)
     if (product) jobsQuery = jobsQuery.in('product', product.split(','))
 
-    const { data: jobs, error: jobsError } = await jobsQuery
-    if (jobsError) return res.status(500).json({ error: jobsError.message })
-    if (!jobs?.length) return res.json({ rows: [], summary: {} })
+    let jobs: any[] = []
+    let jobsFrom = 0
+    while (true) {
+      const { data, error: jobsError } = await jobsQuery.range(jobsFrom, jobsFrom + 999)
+      if (jobsError) return res.status(500).json({ error: jobsError.message })
+      if (!data?.length) break
+      jobs = jobs.concat(data)
+      if (data.length < 1000) break
+      jobsFrom += 1000
+    }
+    if (!jobs.length) return res.json({ rows: [], summary: {} })
 
     const jobIds = jobs.map(j => j.lp_job_id)
 
-    const { data: costs, error: costsError } = await supabase
-      .from('job_costs')
-      .select('lp_job_id, category, is_sub, total_cost, mat_type')
-      .eq('cost_type', 'actual')
-      .in('lp_job_id', jobIds)
-
-    if (costsError) return res.status(500).json({ error: costsError.message })
+    let costs: any[] = []
+    let costsFrom = 0
+    while (true) {
+      const { data, error: costsError } = await supabase
+        .from('job_costs')
+        .select('lp_job_id, category, is_sub, total_cost, mat_type')
+        .eq('cost_type', 'actual')
+        .in('lp_job_id', jobIds)
+        .range(costsFrom, costsFrom + 999)
+      if (costsError) return res.status(500).json({ error: costsError.message })
+      if (!data?.length) break
+      costs = costs.concat(data)
+      if (data.length < 1000) break
+      costsFrom += 1000
+    }
 
     const costMap: Record<number, any> = {}
     for (const c of (costs || [])) {
