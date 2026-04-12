@@ -2,7 +2,7 @@ import { lpPost } from '../lib/lpClient'
 import { supabase } from '../lib/supabase'
 import { createMeasureSheet } from '../lib/googleSheets'
 
-const ACTIVE_STATUSES = ['SN','PU','SS','MR','D','B','1','2','3','NS','SV','S','5','T','SI','CM','U']
+const ACTIVE_STATUSES = ['N','SN','PU','SS','MR','D','B','1','2','3','NS','SV','S','5','T','C','P','E','X','G','J','U','L','SI','CM']
 const CLOSED_STATUSES = ['C','P','E','X','G','J','L']
 const ALL_STATUSES = [...ACTIVE_STATUSES, ...CLOSED_STATUSES]
 const MEASURE_SHEET_STATUSES = ['SN', 'PU', 'SS']
