@@ -246,7 +246,7 @@ router.get('/variance', async (req, res) => {
     while (true) {
       const { data, error } = await supabase
         .from('job_costs')
-        .select('lp_job_id, cost_type, total_cost')
+        .select('lp_job_id, cost_type, category, total_cost')
         .range(from, from + pageSize - 1)
       if (error) return res.status(500).json({ error: error.message })
       if (!data?.length) break
