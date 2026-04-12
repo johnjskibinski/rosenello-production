@@ -241,6 +241,7 @@ router.get('/variance', async (req, res) => {
 
     const costMap: Record<number, any> = {}
     for (const c of allCosts) {
+      if (!['Materials', 'Labor'].includes(c.category)) continue
       if (!costMap[c.lp_job_id]) costMap[c.lp_job_id] = { estimated: 0, actual: 0 }
       if (c.cost_type === 'estimated') costMap[c.lp_job_id].estimated += c.total_cost
       if (c.cost_type === 'actual')    costMap[c.lp_job_id].actual    += c.total_cost
