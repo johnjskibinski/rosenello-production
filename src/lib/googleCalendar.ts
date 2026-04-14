@@ -14,8 +14,8 @@ function getCalendarClient() {
 
 // Color ID → event type
 export function colorToEventType(colorId: string | null | undefined): string {
+  if (!colorId || colorId === '6') return 'install'  // null = calendar default (orange) or Tangerine
   if (colorId === '5')  return 'measure'       // Banana/Yellow
-  if (colorId === '6')  return 'install'       // Tangerine/Orange
   if (colorId === '7')  return 'service'       // Peacock/Blue
   if (colorId === '8')  return 'reminder'      // Graphite/Grey
   if (colorId === '11') return 'availability'  // Tomato/Red
