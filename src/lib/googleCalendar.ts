@@ -164,8 +164,10 @@ export async function matchEventToJob(gcalEvent: any): Promise<any | null> {
 // Pull events from GCal, upsert into Supabase
 export async function pullFromGCal(): Promise<{ synced: number; unlinked: number }> {
   const cal = getCalendarClient()
-  const threeWeeksAgo = new Date()
-  threeWeeksAgo.setDate(threeWeeksAgo.getDate() - 21)
+  const windowStart = new Date()
+  windowStart.setDate(windowStart.getDate() - 2)
+  const windowEnd = new Date()
+  windowEnd.setDate(windowEnd.getDate() + 7)
 
   let synced = 0
   let unlinked = 0
@@ -174,7 +176,8 @@ export async function pullFromGCal(): Promise<{ synced: number; unlinked: number
   do {
     const res = await cal.events.list({
       calendarId: CALENDAR_ID,
-      timeMin: threeWeeksAgo.toISOString(),
+      timeMin: windowStart.toISOString(),
+      timeMax: windowEnd.toISOString(),
       maxResults: 250,
       singleEvents: true,
       orderBy: 'startTime',
