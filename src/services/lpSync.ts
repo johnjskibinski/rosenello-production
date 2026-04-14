@@ -1,6 +1,7 @@
 import { lpPost } from '../lib/lpClient'
 import { supabase } from '../lib/supabase'
 import { createMeasureSheet } from '../lib/googleSheets'
+import { createOpenPhoneContact } from '../lib/openPhone'
 
 const ACTIVE_STATUSES = ['N','SN','PU','SS','MR','D','B','1','2','3','NS','SV','S','5','T','C','P','E','X','G','J','U','L','SI','CM']
 const CLOSED_STATUSES = ['C','P','E','X','G','J','L']
@@ -62,6 +63,15 @@ export async function syncActiveJobs() {
 
         console.log(`[Sync] Status ${status} page ${page}: ${mapped.length} jobs`)
 
+        // Capture which jobs are brand new before upsert
+        const batchIds = mapped.map(j => j.lp_job_id)
+        const { data: alreadyExisting } = await supabase
+          .from('jobs')
+          .select('lp_job_id')
+          .in('lp_job_id', batchIds)
+        const existingIds = new Set((alreadyExisting || []).map((r: any) => r.lp_job_id))
+        const newJobs = mapped.filter(j => !existingIds.has(j.lp_job_id))
+
         const { error } = await supabase
           .from('jobs')
           .upsert(mapped, { onConflict: 'lp_job_id' })
@@ -94,6 +104,17 @@ export async function syncActiveJobs() {
                   .update({ measure_sheet_url: sheetUrl })
                   .eq('lp_job_id', job.lp_job_id)
               }
+            }
+          }
+
+          // OpenPhone: create contacts for new jobs only
+          for (const job of newJobs) {
+            const contactId = await createOpenPhoneContact(job)
+            if (contactId) {
+              await supabase
+                .from('jobs')
+                .update({ openphone_contact_id: contactId })
+                .eq('lp_job_id', job.lp_job_id)
             }
           }
         }
