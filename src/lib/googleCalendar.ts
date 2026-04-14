@@ -200,21 +200,6 @@ export async function pullFromGCal(): Promise<{ synced: number; unlinked: number
       let job: any = null
       let linked = false
 
-      // Skip availability matching
-      if (eventType === 'availability') {
-        if (allDay && ev.id) {
-          const date = startTime.slice(0, 10)
-          const notes = ev.summary || ''
-          const { data: existing } = await supabase
-            .from('calendar_availability').select('gcal_event_ids').eq('date', date).single()
-          const existingIds = existing?.gcal_event_ids || []
-          const mergedIds = Array.from(new Set([...existingIds, ev.id]))
-          await supabase.from('calendar_availability')
-            .upsert({ date, notes, gcal_event_ids: mergedIds, updated_at: new Date().toISOString() }, { onConflict: 'date' })
-        }
-        continue
-      }
-
       job = await matchEventToJob(ev)
       linked = !!job
       if (!linked) unlinked++
