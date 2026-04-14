@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 
 const OPENPHONE_API_KEY = process.env.OPENPHONE_API_KEY!;
 const BASE_URL = 'https://api.openphone.com/v1';
