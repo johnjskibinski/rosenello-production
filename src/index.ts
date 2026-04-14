@@ -23,7 +23,7 @@ app.use('/api/costs', costsRouter)
 app.use('/api/reports', reportsRouter)
 
 // Sync Mon-Fri every 4 hours between 7am-7pm (Eastern)
-cron.schedule('0 7,11,15,19 * * 1-5', async () => {
+cron.schedule('0 7,9,11,13,15,17,19 * * 1-5', async () => {
   console.log('[Cron] Running scheduled LP sync');
   try {
     const { syncActiveJobs } = await import('./services/lpSync.js');
