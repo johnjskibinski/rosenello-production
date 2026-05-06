@@ -15,6 +15,18 @@ function getAuth() {
   return oauth2Client
 }
 
+async function setAnyoneWithLink(drive: any, fileId: string) {
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: { role: 'writer', type: 'anyone' },
+    })
+  } catch (err: any) {
+    // Permission may already exist; safe to ignore
+    console.log(`Permission set/exists for ${fileId}: ${err?.message || 'ok'}`)
+  }
+}
+
 export async function createMeasureSheet(job: any): Promise<string | null> {
   try {
     const auth = getAuth()
@@ -30,8 +42,11 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
       fields: 'files(id, name)',
     })
     if (existing.data.files && existing.data.files.length > 0) {
+      const existingId = existing.data.files[0].id || null
       console.log(`Measure sheet already exists for job ${job.lp_job_id}`)
-      return existing.data.files[0].id || null
+      // Make sure existing sheets also have public link sharing
+      if (existingId) await setAnyoneWithLink(drive, existingId)
+      return existingId
     }
 
     // Copy the template into the Rosenello Measure Sheets folder
@@ -43,6 +58,9 @@ export async function createMeasureSheet(job: any): Promise<string | null> {
       },
     })
     const newSheetId = copy.data.id!
+
+    // Anyone with the link can edit — Eric and team should not need to request access
+    await setAnyoneWithLink(drive, newSheetId)
 
     const d = job.raw_lp_data || {}
     const address = [d.address1, d.city, d.state, d.zip].filter(Boolean).join(', ')
