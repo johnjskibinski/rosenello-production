@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cron from 'node-cron';
 import { env } from './config/env';
+import { requireApiKey } from './middleware/requireApiKey';
 import kpiRouter from './routes/kpi';
 import jobRoutes from './routes/jobs'
 import calendarRouter from './routes/calendar'
@@ -16,6 +17,9 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
+
+// Everything under /api requires the shared secret (sent by the Next.js proxy)
+app.use('/api', requireApiKey);
 app.use('/api/kpi', kpiRouter);
 app.use('/api/jobs', jobRoutes)
 app.use('/api/calendar', calendarRouter)
